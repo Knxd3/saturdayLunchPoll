@@ -1,3 +1,7 @@
 .satlunchpoll
 Dockerfile
 fly.toml
+soups
+database.db
+temp_snippet.txt
+.dockerignore
