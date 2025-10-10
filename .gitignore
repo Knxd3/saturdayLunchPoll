@@ -5,3 +5,4 @@ soups
 database.db
 temp_snippet.txt
 .dockerignore
+fly_instructions.txt

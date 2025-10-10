@@ -3,8 +3,9 @@ Web scraper for restaurant listings.
 """
 from bs4 import BeautifulSoup
 from pathlib import Path
+import os
 
-def scrape_restaurants(num_pages: int):
+def scrape_restaurants():
     # response = requests.get(url, timeout=10)
     # response.raise_for_status()
     # soup = BeautifulSoup(response.text, "html.parser")
@@ -12,7 +13,9 @@ def scrape_restaurants(num_pages: int):
     # container = soup.find("div", {"data-testid": "result-list-restaurants"})
     restaurants = []
     base = Path(__file__).resolve().parent.parent / "soups"
-    for page in [i for i in range(1, num_pages + 1)]:
+    count_pages = len(os.listdir(base))
+    print(count_pages)
+    for page in [i for i in range(1, count_pages + 1)]:
         file_path = base / f"souppage{page}.txt"
         with open(file_path, "r", encoding="utf-8") as f:
             response = f.read()
