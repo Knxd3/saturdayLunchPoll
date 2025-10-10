@@ -24,34 +24,36 @@ HTML_TEMPLATE = """
   <title>Saturday Lunch Poll</title>
   <style>
     :root {
-      --bg: #0b0f19;
-      --card: #111827;
-      --muted: #9ca3af;
-      --accent: #60a5fa;
-      --accent-strong: #3b82f6;
-      --text: #e5e7eb;
-      --chip: #1f2937;
-      --chip-border: #374151;
+      --bg: #f7fafc;
+      --card: #ffffff;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-strong: #1d4ed8;
+      --text: #111827;
+      --chip: #f3f4f6;
+      --chip-border: #e5e7eb;
+      --border: #e5e7eb;
+      --shadow: 0 6px 24px rgba(0,0,0,0.08);
     }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 20% -10%, #0f172a 10%, var(--bg) 60%); color: var(--text); }
-    .wrap { max-width: 840px; margin: 0 auto; padding: 32px 16px 48px; }
-    .title { text-align:center; margin-bottom: 18px; font-size: 28px; letter-spacing: 0.3px; }
-    .subtitle { text-align:center; margin: 0 auto 28px; max-width: 700px; color: var(--muted); font-size: 14px; }
-    .poll { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00)); border:1px solid #111827; box-shadow: 0 8px 32px rgba(0,0,0,0.25); border-radius: 16px; padding: 12px; }
-    form { display:grid; grid-template-columns: 1fr; gap: 10px; }
-    @media (min-width: 740px){ form { grid-template-columns: 1fr 1fr; } }
-    .option { display:flex; gap:12px; padding:12px; border:1px solid var(--chip-border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease; cursor: pointer; }
-    .option:hover { border-color: var(--accent); }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 32px 16px 48px; }
+    .title { text-align:center; margin-bottom: 8px; font-size: 28px; letter-spacing: 0.2px; }
+    .subtitle { text-align:center; margin: 0 auto 24px; max-width: 720px; color: var(--muted); font-size: 14px; }
+    .poll { background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 16px; padding: 16px; }
+    form { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 840px){ form { grid-template-columns: 1fr 1fr; } }
+    .option { display:flex; gap:12px; padding:14px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; }
+    .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
     .option:active { transform: translateY(1px); }
     .option input { margin-top: 4px; accent-color: var(--accent-strong); }
-    .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:6px; }
+    .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
     .name { font-weight: 700; letter-spacing:.2px; }
-    .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:10px; }
+    .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:12px; }
     .toprow { display:flex; align-items:center; gap:10px; }
-    .votes { margin-left:auto; background: #111827; border:1px solid var(--chip-border); padding:4px 10px; border-radius: 999px; font-size: 12px; color:#f9fafb; }
-    .vote { margin-top: 14px; display:flex; justify-content:center; }
+    .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; }
+    .vote { margin-top: 16px; display:flex; justify-content:center; }
     .vote button { background: var(--accent-strong); color: #fff; border:none; padding: 10px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
     a.link { color: var(--accent); text-decoration: none; }
     a.link:hover { text-decoration: underline; }
