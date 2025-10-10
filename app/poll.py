@@ -77,7 +77,7 @@ HTML_TEMPLATE = """
               <div>
                 <div class="toprow"><div class="name">{{ opt['name'] }}</div><span class="votes">{{ opt['votes'] }} votes</span></div>
                 <div class="info">
-                  {% if opt.get('average_price') %}<span>Avg: {{ opt['average_price'] }}</span>{% endif %}
+                  {% if opt.get('average_price') %}<span>{{ opt['average_price'] }}</span>{% endif %}
                   {% if opt.get('address') %}<span>Loc: {{ opt['address'] }}</span>{% endif %}
                   {% if opt.get('cuisine') %}<span>Cuisine: {{ opt['cuisine'] }}</span>{% endif %}
                 </div>

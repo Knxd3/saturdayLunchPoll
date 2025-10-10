@@ -14,7 +14,6 @@ def scrape_restaurants():
     restaurants = []
     base = Path(__file__).resolve().parent.parent / "soups"
     count_pages = len(os.listdir(base))
-    print(count_pages)
     for page in [i for i in range(1, count_pages + 1)]:
         file_path = base / f"souppage{page}.txt"
         with open(file_path, "r", encoding="utf-8") as f:
