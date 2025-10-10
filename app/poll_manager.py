@@ -50,6 +50,7 @@ def refresh_weekly_selection() -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+
         # Pick 7 random restaurants (by name/url). Rely on whatever schema seed_db created.
         rows = cur.execute(
             """
@@ -59,6 +60,38 @@ def refresh_weekly_selection() -> None:
             LIMIT 7
             """
         ).fetchall()
+        # Only rotate if we successfully sampled 7 (or >0) rows
+        if not rows:
+            return
+
+        # Archive the finishing week (preserve its original created_at and votes)
+        rows_ = cur.execute(
+            """
+            SELECT name, address, cuisine, average_price, rating, reviews, offer, url, votes, created_at
+            FROM weekly_selection
+            """
+        ).fetchall()
+        for r in rows_:
+            cur.execute(
+                (
+                    "INSERT INTO weekly_results"
+                    "(name, address, cuisine, average_price, rating, reviews, offer, url, votes, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    r["name"],
+                    r["address"] if "address" in r.keys() else None,
+                    r["cuisine"] if "cuisine" in r.keys() else None,
+                    r["average_price"] if "average_price" in r.keys() else None,
+                    r["rating"] if "rating" in r.keys() else None,
+                    r["reviews"] if "reviews" in r.keys() else None,
+                    r["offer"] if "offer" in r.keys() else None,
+                    r["url"] if "url" in r.keys() else None,
+                    r["votes"] if "votes" in r.keys() else None,
+                    r["created_at"] if "created_at" in r.keys() else now_iso,
+                ),
+            )
+
         # Replace current batch
         cur.execute("DELETE FROM weekly_selection")
         for r in rows:

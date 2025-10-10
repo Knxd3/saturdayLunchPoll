@@ -38,6 +38,25 @@ def init_db():
         """
     )
 
+    # Historical record of weekly selection and votes
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS weekly_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            address TEXT,
+            cuisine TEXT,
+            average_price TEXT,
+            rating TEXT,
+            reviews TEXT,
+            offer TEXT,
+            url TEXT,
+            votes INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL UNIQUE
+        )
+        """
+    )
+
     # Ensure backward compatibility if table existed without 'votes' column
     try:
         cur.execute("PRAGMA table_info(weekly_selection)")
