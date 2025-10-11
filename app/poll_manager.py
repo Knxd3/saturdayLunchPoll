@@ -131,14 +131,36 @@ def get_current_week_selection() -> list[dict]:
         last = _get_last_generated_at(conn)
         if not last:
             return []
+        ts = last.isoformat(timespec="seconds")
+        # Compute votes from normalized table to avoid any stale counters
         rows = conn.execute(
             (
-                "SELECT id, name, address, cuisine, average_price, rating, reviews, offer, url, votes "
-                "FROM weekly_selection WHERE created_at = ?"
+                "SELECT ws.id, ws.name, ws.address, ws.cuisine, ws.average_price, ws.rating, ws.reviews, ws.offer, ws.url, "
+                "COALESCE(v.cnt, 0) AS votes "
+                "FROM weekly_selection ws "
+                "LEFT JOIN (SELECT option_id, COUNT(*) AS cnt FROM votes WHERE week_created_at = ? GROUP BY option_id) v "
+                "ON v.option_id = ws.id "
+                "WHERE ws.created_at = ?"
             ),
-            (last.isoformat(timespec="seconds"),),
+            (ts, ts),
         ).fetchall()
-        return [dict(r) for r in rows]
+        options = [dict(r) for r in rows]
+        # Attach voter profiles per option from normalized votes table
+        vote_rows = conn.execute(
+            (
+                "SELECT option_id, email, name, picture FROM votes "
+                "WHERE week_created_at = ? ORDER BY id ASC"
+            ),
+            (ts,),
+        ).fetchall()
+        voters_by_option: dict[int, list[dict]] = {}
+        for vr in vote_rows:
+            voters_by_option.setdefault(vr["option_id"], []).append(
+                {"email": vr["email"], "name": vr["name"] or vr["email"], "picture": vr["picture"]}
+            )
+        for opt in options:
+            opt["voters"] = voters_by_option.get(opt["id"], [])
+        return options
 
 
 def backfill_current_selection_details() -> None:
@@ -191,7 +213,7 @@ def voter_already_voted(voter_id: str | None, ip_hash: str | None) -> bool:
         return row is not None
 
 
-def log_voter(voter_id: str, ip_hash: str, user_agent: str | None) -> None:
+def log_voter(voter_id: str, ip_hash: str, user_agent: str | None, email: str | None = None) -> None:
     ts = get_latest_created_at_iso()
     if not ts:
         return
@@ -199,14 +221,29 @@ def log_voter(voter_id: str, ip_hash: str, user_agent: str | None) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         try:
+            # Prefer inserting email if the column exists
             cur.execute(
-                "INSERT INTO voter_log (week_created_at, voter_id, ip_hash, user_agent, created_at) VALUES (?, ?, ?, ?, ?)",
-                (ts, voter_id, ip_hash, user_agent or "", now_iso),
+                (
+                    "INSERT INTO voter_log (week_created_at, voter_id, ip_hash, user_agent, email, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+                ),
+                (ts, voter_id, ip_hash, user_agent or "", email or "", now_iso),
             )
             conn.commit()
         except Exception:
-            # Ignore uniqueness collisions
-            pass
+            try:
+                # Fallback for older schemas without email column
+                cur.execute(
+                    (
+                        "INSERT INTO voter_log (week_created_at, voter_id, ip_hash, user_agent, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)"
+                    ),
+                    (ts, voter_id, ip_hash, user_agent or "", now_iso),
+                )
+                conn.commit()
+            except Exception:
+                # Ignore uniqueness collisions or other insert errors
+                pass
 
 
 def is_voting_open(now: datetime | None = None) -> bool:
@@ -236,19 +273,38 @@ def get_voting_window() -> dict:
         return {"open": open_start.isoformat(timespec="minutes"), "close": close_end.isoformat(timespec="minutes")}
 
 
-def record_vote(option_id: int) -> bool:
-    """Increment vote for a given option id if it belongs to the current batch.
-    Returns True if a row was updated, False otherwise.
+def record_vote(option_id: int, voter: dict | None = None) -> bool:
+    """Increment vote for a given option id and record voter profile in normalized table.
+    Returns True if a new vote was recorded, False otherwise.
     """
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
             return False
+        ts = last.isoformat(timespec="seconds")
         cur = conn.cursor()
-        cur.execute(
-            "UPDATE weekly_selection SET votes = votes + 1 WHERE id = ? AND created_at = ?",
-            (option_id, last.isoformat(timespec="seconds")),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        email = (voter or {}).get("email") if voter else None
+        name = (voter or {}).get("name") if voter else None
+        picture = (voter or {}).get("picture") if voter else None
+        if not email:
+            return False
+        # Try to insert a vote row; unique constraint prevents duplicates per option/email/week
+        try:
+            cur.execute(
+                (
+                    "INSERT INTO votes (week_created_at, option_id, email, name, picture, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+                ),
+                (ts, option_id, email, name, picture, _now().isoformat(timespec="seconds")),
+            )
+            # Increment the denormalized counter for quick reads
+            cur.execute(
+                "UPDATE weekly_selection SET votes = votes + 1 WHERE id = ? AND created_at = ?",
+                (option_id, ts),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            # Likely a uniqueness collision; treat as no-op
+            return False

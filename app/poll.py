@@ -2,7 +2,7 @@
 Poll routes.
 """
 import uuid
-from flask import Blueprint, render_template_string, request, redirect, url_for, make_response
+from flask import Blueprint, render_template_string, request, redirect, url_for, make_response, session
 from .poll_manager import (
     ensure_weekly_selection,
     get_current_week_selection,
@@ -61,7 +61,18 @@ HTML_TEMPLATE = """
   </head>
   <body>
     <div class="wrap">
-      <div class="title">Where should we go for lunch?</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+      <h1 style = "flex:1; text-align:center; margin:0;">Where should we go for lunch?</h1>
+      {% if session.get('user') %}
+        <div>
+          <img src="{{ session['user']['picture'] }}" alt="profile" style="width:32px; height:32px; border-radius:50%;">
+          <!-- <span style="font-size:0.9rem; margin-right:1rem; margin-left:auto;">{{ session['user']['email'] }}</span> -->
+          <a href="{{ url_for('login.logout') }}" style="color:#2563eb; text-decoration:none;">Logout</a>
+        </div>
+      {% else %}
+        <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
+      {% endif %}
+      </div>
       <div class="subtitle">Vote for this week's pick. Options refresh every Monday at 10:00. Voting closes Wednesday 23:00.</div>
       {% if already_voted %}
         <div style="padding:10px 12px; color:#fbbf24;">Looks like you already voted this week.</div>
@@ -75,7 +86,17 @@ HTML_TEMPLATE = """
             <label class="option">
               <input type="checkbox" name="option_ids" value="{{ opt['id'] }}" {% if not can_vote %}disabled{% endif %}>
               <div>
-                <div class="toprow"><div class="name">{{ opt['name'] }}</div><span class="votes">{{ opt['votes'] }} votes</span></div>
+                <div class="toprow">
+                  <div class="name">{{ opt['name'] }}</div>
+                  <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
+                    {% for v in opt.get('voters', []) %}
+                      {% if v.get('picture') %}
+                        <img src="{{ v['picture'] }}" alt="{{ v.get('name') or v.get('email') }}" title="{{ v.get('name') or v.get('email') }}" style="width:18px; height:18px; border-radius:50%; border:1px solid #e5e7eb;" />
+                      {% endif %}
+                    {% endfor %}
+                    <span class="votes" title="{{ (opt.get('voters') or []) | map(attribute='name') | join(', ') }}">{{ opt['votes'] }} votes</span>
+                  </div>
+                </div>
                 <div class="info">
                   {% if opt.get('average_price') %}<span>{{ opt['average_price'] }}</span>{% endif %}
                   {% if opt.get('address') %}<span>Loc: {{ opt['address'] }}</span>{% endif %}
@@ -106,11 +127,13 @@ def show_poll():
     ensure_weekly_selection()
     options = get_current_week_selection()
     # derive identity and vote eligibility
-    voter_id = request.cookies.get("voter_id")
+    user = session.get("user")
+    email = (user or {}).get("email") if user else None
+    voter_id = email or request.cookies.get("voter_id")
     client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
     already = voter_already_voted(voter_id, hash_ip(client_ip)) if voter_id or client_ip else False
     voting_open = is_voting_open()
-    can_vote = voting_open and not already
+    can_vote = voting_open and (user is not None) and not already
     return render_template_string(
         HTML_TEMPLATE,
         options=options,
@@ -125,14 +148,23 @@ def show_poll():
 def vote():
     ensure_weekly_selection()
     option_ids = request.form.getlist("option_ids")
-    # identify voter
-    voter_id = request.cookies.get("voter_id") or uuid.uuid4().hex
+    # require login
+    user = session.get("user")
+    if not user:
+        # stash pending selections and bounce to login
+        if option_ids:
+            session["pending_option_ids"] = option_ids
+        session["post_login_redirect"] = "poll.resume_vote"
+        return redirect(url_for("login.login", next="poll.resume_vote"))
+    # identify voter via email
+    voter_id = user.get("email") or uuid.uuid4().hex
     client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
     ip_h = hash_ip(client_ip)
 
     resp = make_response(redirect(url_for("poll.show_poll")))
-    # persist cookie for a while
-    resp.set_cookie("voter_id", voter_id, max_age=60*60*24*120, samesite="Lax")
+    # persist an opaque cookie for a while (not email)
+    cookie_id = request.cookies.get("voter_id") or uuid.uuid4().hex
+    resp.set_cookie("voter_id", cookie_id, max_age=60*60*24*120, samesite="Lax")
 
     # enforce window and one-vote-per-week
     if not is_voting_open():
@@ -146,8 +178,42 @@ def vote():
                 option_int = int(oid)
             except Exception:
                 continue
-            record_vote(option_int)
+            record_vote(option_int, user)
         # log voter after successful vote(s)
         from .poll_manager import log_voter
-        log_voter(voter_id, ip_h, request.headers.get("User-Agent"))
+        log_voter(voter_id, ip_h, request.headers.get("User-Agent"), email=voter_id)
+    return resp
+
+
+@poll_bp.route("/vote/resume")
+def resume_vote():
+    """After login, complete any pending selections stored in session."""
+    ensure_weekly_selection()
+    user = session.get("user")
+    if not user:
+        session["post_login_redirect"] = "poll.resume_vote"
+        return redirect(url_for("login.login", next="poll.resume_vote"))
+    # identify voter via email
+    voter_id = user.get("email") or uuid.uuid4().hex
+    client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
+    ip_h = hash_ip(client_ip)
+
+    # enforce window and one-vote-per-week
+    resp = make_response(redirect(url_for("poll.show_poll")))
+    if not is_voting_open():
+        session.pop("pending_option_ids", None)
+        return resp
+    if voter_already_voted(voter_id, ip_h):
+        session.pop("pending_option_ids", None)
+        return resp
+
+    option_ids = session.pop("pending_option_ids", []) or []
+    for oid in option_ids:
+        try:
+            option_int = int(oid)
+        except Exception:
+            continue
+        record_vote(option_int, user)
+    from .poll_manager import log_voter
+    log_voter(voter_id, ip_h, request.headers.get("User-Agent"), email=voter_id)
     return resp
