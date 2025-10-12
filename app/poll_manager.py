@@ -1,7 +1,9 @@
 import os
 import sqlite3
 import hashlib
+import random
 from datetime import datetime, timedelta, time
+from .MBA import update_mab_stats
 
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 IP_SALT = os.environ.get("IP_SALT", "change-me-salt")
@@ -45,26 +47,38 @@ def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
         return now >= _next_monday_10am(last)
 
 
+"""
 def refresh_weekly_selection() -> None:
+    ...  # Old random sampler preserved for reference
+"""
+
+
+def refresh_weekly_selection() -> None:
+    """Rotate weekly selection using Thompson Sampling over Beta priors.
+
+    Chooses 7 restaurants by sampling Beta(alpha, beta) where alpha/beta come
+    from a rolling window of weekly_results weighted by per-week turnout.
+    Preserves the output shape and archiving semantics of the previous version.
+    """
     now_iso = _now().isoformat(timespec="seconds")
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Pick 7 random restaurants (by name/url). Rely on whatever schema seed_db created.
-        rows = cur.execute(
-            """
-            SELECT name, address, cuisine, average_price, rating, reviews, offer, url
-            FROM restaurants
-            ORDER BY RANDOM()
-            LIMIT 7
-            """
-        ).fetchall()
-        # Only rotate if we successfully sampled 7 (or >0) rows
-        if not rows:
+        # Update bandit stats and sample scores
+        stats = update_mab_stats()
+        if not stats:
+            return
+        samples = [
+            (row["name"], random.betavariate(max(1e-6, float(row["alpha"])), max(1e-6, float(row["beta"]))))
+            for row in stats
+        ]
+        samples.sort(key=lambda x: x[1], reverse=True)
+        chosen_names = [name for name, _ in samples[:7]]
+        if not chosen_names:
             return
 
-        # Archive the finishing week (preserve its original created_at and votes)
+        # Archive the finishing week
         rows_ = cur.execute(
             """
             SELECT name, address, cuisine, average_price, rating, reviews, offer, url, votes, created_at
@@ -92,9 +106,24 @@ def refresh_weekly_selection() -> None:
                 ),
             )
 
-        # Replace current batch
+        # Replace current batch using chosen names
         cur.execute("DELETE FROM weekly_selection")
-        for r in rows:
+
+        # Fetch all chosen rows in one go, then insert in sampled order
+        placeholders = ",".join(["?"] * len(chosen_names))
+        rs = cur.execute(
+            (
+                "SELECT name, address, cuisine, average_price, rating, reviews, offer, url "
+                f"FROM restaurants WHERE name IN ({placeholders})"
+            ),
+            chosen_names,
+        ).fetchall()
+        by_name = {r["name"]: r for r in rs}
+
+        for nm in chosen_names:
+            r = by_name.get(nm)
+            if not r:
+                continue
             cur.execute(
                 (
                     "INSERT INTO weekly_selection "

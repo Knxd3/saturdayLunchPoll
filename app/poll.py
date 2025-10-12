@@ -113,7 +113,7 @@ HTML_TEMPLATE = """
               </div>
             </label>
           {% endfor %}
-          <div class="vote" style="width:100%; display:inline"><button type="submit" {% if not can_vote %}disabled style="opacity:.6; cursor:not-allowed;"{% endif %}>Submit Votes</button></div>
+          <div class="vote" style="width:100%; display:block"><button type="submit" {% if not can_vote %}disabled style="opacity:.6; cursor:not-allowed;"{% endif %}>Submit Votes</button></div>
         </form>
       </div>
     </div>
