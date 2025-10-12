@@ -84,7 +84,7 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
         appear AS (
             SELECT name, COUNT(*) AS app_count
             FROM recent
-            GROUP BY name
+            GROUP BY namepy -
         ),
         agg AS (
             SELECT name,
