@@ -114,7 +114,7 @@ def refresh_weekly_selection() -> None:
         rs = cur.execute(
             (
                 "SELECT name, address, cuisine, average_price, rating, reviews, offer, url "
-                f"FROM restaurants WHERE name IN ({placeholders})"
+                f"FROM restaurants WHERE COALESCE(is_excluded,0)=0 AND name IN ({placeholders})"
             ),
             chosen_names,
         ).fetchall()

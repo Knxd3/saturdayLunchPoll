@@ -54,7 +54,7 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
         WITH recent AS (
             SELECT name, votes, created_at
             FROM weekly_results
-            WHERE created_at >= ?
+            WHERE created_at >= ? AND COALESCE(is_excluded, 0) = 0
         ),
         totals_per_week AS (
             SELECT created_at, SUM(votes) AS total_votes
@@ -106,7 +106,7 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
     ).fetchall()
 
     # Merge with the full restaurant set so newcomers are included
-    all_names = {r["name"] for r in cur.execute("SELECT name FROM restaurants").fetchall()}
+    all_names = {r["name"] for r in cur.execute("SELECT name FROM restaurants WHERE COALESCE(is_excluded,0)=0").fetchall()}
     hist_map = {}
     for r in stats_rows:
         hist_map[r["name"]] = {

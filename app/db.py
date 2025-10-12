@@ -51,6 +51,7 @@ def init_db():
             reviews TEXT,
             offer TEXT,
             url TEXT,
+            is_excluded INTEGER NOT NULL DEFAULT 0,
             votes INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL UNIQUE
         )
