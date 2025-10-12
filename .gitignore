@@ -9,3 +9,5 @@ fly_instructions.txt
 client_secret_satlunchpoll.json
 secret_key.txt
 __pycache__
+misc
+notebook.py
