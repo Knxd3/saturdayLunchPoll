@@ -84,7 +84,7 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
         appear AS (
             SELECT name, COUNT(*) AS app_count
             FROM recent
-            GROUP BY namepy -
+            GROUP BY name
         ),
         agg AS (
             SELECT name,
@@ -102,7 +102,7 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
         LEFT JOIN wins w ON w.name = a.name
         LEFT JOIN agg g ON g.name = a.name
         """,
-        (window_start_iso,),
+        (window_start_iso,)
     ).fetchall()
 
     # Merge with the full restaurant set so newcomers are included
