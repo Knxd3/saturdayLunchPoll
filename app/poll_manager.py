@@ -83,6 +83,7 @@ def refresh_weekly_selection() -> None:
         ]
         samples.sort(key=lambda x: x[1], reverse=True)
         chosen_names = [name for name, _ in samples[:7]]
+        print(samples[:7])
         if not chosen_names:
             return
 
@@ -350,3 +351,20 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
         except Exception:
             # Likely a uniqueness collision; treat as no-op
             return False
+
+
+if __name__ == '__main__':
+    # refresh_weekly_selection()
+    
+    stats = update_mab_stats()
+    import random
+    samples = [
+            (row["name"], random.betavariate(max(1e-6, float(row["alpha"])), max(1e-6, float(row["beta"]))))
+            for row in stats
+        ]
+    samples.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"\n Just Thompson samples: {samples[:7]}")
+    # print(update_mab_stats())
+
+    print(get_current_week_selection())

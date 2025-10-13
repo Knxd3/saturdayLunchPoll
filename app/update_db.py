@@ -2,9 +2,15 @@ from .scraper import scrape_restaurants
 from .db import get_db_connection
 import pandas as pd
 
+
 def update_restaurants():
-    df = pd.DataFrame(scrape_restaurants(num_pages=7))
-    df["reviews"] = "Reviews: " + df["reviews"].str.extract(r"\((\d+)\)")[0]
+    df = pd.DataFrame(scrape_restaurants())
+    # Ensure numeric dtypes where appropriate
+    for col, as_float in [("rating", True), ("reviews", False), ("average_price", False), ("offer", False)]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            if not as_float:
+                df[col] = df[col].astype("Int64")
     conn = get_db_connection()
     cur = conn.cursor()
     # cur.execute("""
@@ -16,10 +22,10 @@ def update_restaurants():
         name TEXT UNIQUE,
         address TEXT,
         cuisine TEXT,
-        average_price TEXT,
-        rating TEXT,
-        reviews TEXT,
-        offer TEXT,
+        average_price INTEGER,
+        rating REAL,
+        reviews INTEGER,
+        offer INTEGER,
         url TEXT
     )
     """)

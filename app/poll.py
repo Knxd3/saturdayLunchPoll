@@ -42,16 +42,17 @@ HTML_TEMPLATE = """
     .subtitle { text-align:center; margin: 0 auto 24px; max-width: 720px; color: var(--muted); font-size: 14px; }
     .poll { background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 16px; padding: 16px; }
     form { display:grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 840px){ form { grid-template-columns: 1fr 1fr; } }
-    .option { display:flex; gap:12px; padding:14px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; }
+    .option { display:flex; gap:12px; padding:14px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
     .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
     .option:active { transform: translateY(1px); }
-    .option input { margin-top: 4px; accent-color: var(--accent-strong); }
+    .option input { margin-top: 4px; accent-color: var(--accent-strong); flex: 0 0 auto; }
+    .option > div { flex: 1 1 auto; min-width: 0; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
     .name { font-weight: 700; letter-spacing:.2px; }
     .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:12px; }
     .toprow { display:flex; align-items:center; gap:10px; }
+    .rank { width: 28px; height: 28px; border-radius: 999px; background: #111827; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; }
     .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; }
     .vote { margin-top: 16px; display:flex; justify-content:center; }
     .vote button { background: var(--accent-strong); color: #fff; border:none; padding: 10px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
@@ -87,6 +88,7 @@ HTML_TEMPLATE = """
               <input type="checkbox" name="option_ids" value="{{ opt['id'] }}" {% if not can_vote %}disabled{% endif %}>
               <div>
                 <div class="toprow">
+                  <div class="rank">#{{ loop.index }}</div>
                   <div class="name">{{ opt['name'] }}</div>
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
                     {% for v in opt.get('voters', []) %}
@@ -98,16 +100,15 @@ HTML_TEMPLATE = """
                   </div>
                 </div>
                 <div class="info">
-                  {% if opt.get('average_price') %}<span>{{ opt['average_price'] }}</span>{% endif %}
                   {% if opt.get('address') %}<span>Loc: {{ opt['address'] }}</span>{% endif %}
                   {% if opt.get('cuisine') %}<span>Cuisine: {{ opt['cuisine'] }}</span>{% endif %}
                 </div>
                 <div class="meta">
                   {% if opt.get('cuisine') %}<span class="chip">{{ opt['cuisine'] }}</span>{% endif %}
                   {% if opt.get('rating') %}<span class="chip">Rating: {{ opt['rating'] }}</span>{% endif %}
-                  {% if opt.get('reviews') %}<span class="chip">{{ opt['reviews'] }}</span>{% endif %}
-                  {% if opt.get('average_price') %}<span class="chip">{{ opt['average_price'] }}</span>{% endif %}
-                  {% if opt.get('offer') %}<span class="chip">Deal: {{ opt['offer'] }}</span>{% endif %}
+                  {% if opt.get('reviews') %}<span class="chip">Reviews: {{ opt['reviews'] }}</span>{% endif %}
+                  {% if opt.get('average_price') %}<span class="chip">Average Price £{{ opt['average_price'] }}</span>{% endif %}
+                  {% if opt.get('offer') %}<span class="chip">Deal: Up to -{{ opt['offer'] }}%</span>{% endif %}
                   {% if opt.get('url') %}<span class="chip"><a target="_blank" class="link" href="{{ opt['url'] }}">View</a></span>{% endif %}
                 </div>
               </div>

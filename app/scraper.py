@@ -4,6 +4,23 @@ Web scraper for restaurant listings.
 from bs4 import BeautifulSoup
 from pathlib import Path
 import os
+import re
+
+
+def _pluck_number(text: str | None):
+    if not text:
+        return None
+    m = re.search(r"-?\d+[\.,]?\d*", text)
+    if not m:
+        return None
+    raw = m.group(0).replace(",", "")
+    try:
+        # Return int when possible, else float
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except Exception:
+        return None
 
 def scrape_restaurants():
     # response = requests.get(url, timeout=10)
@@ -35,14 +52,21 @@ def scrape_restaurants():
             price_el = anchor.find(string=lambda t: t and "Average price" in t)
             offer_el = anchor.find("div", {"data-testid": "offer-tag"})
 
+            rating_text = rating_el.get_text(strip=True) if rating_el else None
+            reviews_text = reviews_el.get_text(strip=True) if reviews_el else None
+            price_text = price_el.strip() if price_el else None
+            offer_text = offer_el.get_text(strip=True) if offer_el else None
+
             data = {
                 "name": name_el.get_text(strip=True) if name_el else None,
                 "address": address_el.get_text(strip=True) if address_el else None,
                 "cuisine": cuisine_el.get_text(strip=True) if cuisine_el else None,
-                "average_price": price_el.strip() if price_el else None,
-                "rating": rating_el.get_text(strip=True) if rating_el else None,
-                "reviews": reviews_el.get_text(strip=True) if reviews_el else None,
-                "offer": offer_el.get_text(strip=True) if offer_el else None,
+                # store numerics
+                "average_price": _pluck_number(price_text),
+                "rating": _pluck_number(rating_text),
+                "reviews": _pluck_number(reviews_text),
+                # store absolute discount percent if present
+                "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
                 "url": anchor["href"],
             }
             # results.append(data)

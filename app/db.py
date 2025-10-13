@@ -43,7 +43,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS weekly_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             address TEXT,
             cuisine TEXT,
             average_price TEXT,
@@ -53,7 +53,7 @@ def init_db():
             url TEXT,
             is_excluded INTEGER NOT NULL DEFAULT 0,
             votes INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL UNIQUE
+            created_at TEXT NOT NULL
         )
         """
     )
