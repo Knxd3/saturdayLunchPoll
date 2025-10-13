@@ -8,13 +8,24 @@ DB_PATH = os.environ.get("DB_PATH", "database.db")
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    # Increase busy timeout to better tolerate brief concurrent access
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    # Ensure DB opens with a generous busy timeout and enable WAL for better concurrency
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     cur = conn.cursor()
+
+    # Enable WAL journal mode (persists with the database file)
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout = 30000")
+    except Exception:
+        # Best-effort: if PRAGMAs fail, continue with defaults
+        pass
 
     # NOTE: The restaurants table may be created via pandas to_sql in seed_db.
     # We don't enforce a schema here to avoid clashing with to_sql(replace).

@@ -57,7 +57,7 @@ def update_mab_stats(window_weeks: int = 200) -> list[dict]:
     window_end = now_london()
     window_start = window_end - timedelta(days=7 * max(1, int(window_weeks)))
     window_start_iso = iso_seconds_local(window_start)
-    print(window_start_iso)
+    # print(window_start_iso)
     window_end_iso = iso_seconds_local(window_end)
     # 1) Materialize weekly rows (no cutoff)
     sql = """

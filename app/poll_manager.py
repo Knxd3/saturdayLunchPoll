@@ -39,7 +39,7 @@ def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
 
 def get_latest_created_at_iso() -> str | None:
     # Return the exact stored string to keep FK/joins stable
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
         return row["ts"] if row and row["ts"] else None
@@ -47,7 +47,7 @@ def get_latest_created_at_iso() -> str | None:
 
 def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
     now = to_london(now) if now else _now()
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if last is None:
@@ -69,7 +69,7 @@ def refresh_weekly_selection() -> None:
     Preserves the output shape and archiving semantics of the previous version.
     """
     now_iso = iso_seconds_local(_now())
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -164,7 +164,7 @@ def ensure_weekly_selection() -> None:
 
 
 def get_current_week_selection() -> list[dict]:
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
@@ -205,7 +205,7 @@ def backfill_current_selection_details() -> None:
     """Backfill any NULL detail columns in the current batch from restaurants.
     Matches by name. Safe to call repeatedly.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
@@ -238,7 +238,7 @@ def voter_already_voted(voter_id: str | None, ip_hash: str | None) -> bool:
     ts = get_latest_created_at_iso()
     if not ts:
         return False
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
@@ -256,7 +256,7 @@ def log_voter(voter_id: str, ip_hash: str, user_agent: str | None, email: str | 
     if not ts:
         return
     now_iso = iso_seconds_local(_now())
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         cur = conn.cursor()
         try:
             # Prefer inserting email if the column exists
@@ -287,7 +287,7 @@ def log_voter(voter_id: str, ip_hash: str, user_agent: str | None, email: str | 
 def is_voting_open(now: datetime | None = None) -> bool:
     """Voting is open from Monday 10:00 to Wednesday 23:00 of the current selection week."""
     now = now or _now()
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
@@ -298,7 +298,7 @@ def is_voting_open(now: datetime | None = None) -> bool:
 
 def get_voting_window() -> dict:
     """Return the voting window for the current selection as ISO strings (no offset)."""
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
@@ -314,16 +314,14 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
     """Increment vote for a given option id and record voter profile in normalized table.
     Returns True if a new vote was recorded, False otherwise.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
             return False
         # Use the exact stored ISO string for joins and keys
-        with sqlite3.connect(DB_PATH) as _c:
-            _c.row_factory = sqlite3.Row
-            ts_row = _c.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
-            ts = ts_row["ts"] if ts_row and ts_row["ts"] else None
+        ts_row = conn.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
+        ts = ts_row["ts"] if ts_row and ts_row["ts"] else None
         if not ts:
             return False
         cur = conn.cursor()
