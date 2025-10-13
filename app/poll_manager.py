@@ -2,43 +2,51 @@ import os
 import sqlite3
 import hashlib
 import random
-from datetime import datetime, timedelta, time
+from datetime import datetime
 from .MBA import update_mab_stats
+from .timeutil import (
+    now_london,
+    to_london,
+    iso_seconds_local,
+    next_monday_10_london,
+    voting_window_london,
+)
 
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 IP_SALT = os.environ.get("IP_SALT", "change-me-salt")
 
 
 def _now() -> datetime:
-    return datetime.now()
+    # Standardized London-local current time (aware)
+    return now_london()
 
 
 def _next_monday_10am(after_dt: datetime) -> datetime:
-    # Compute Monday 10:00 of the week AFTER the week containing after_dt
-    week_monday = after_dt.date() - timedelta(days=after_dt.weekday())
-    next_week_monday = week_monday + timedelta(days=7)
-    return datetime.combine(next_week_monday, time(10, 0))
+    # Monday 10:00 (Europe/London) of the week AFTER `after_dt`
+    return next_monday_10_london(after_dt)
 
 
 def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
     row = conn.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
     if row and row["ts"]:
         try:
-            return datetime.fromisoformat(row["ts"])  # created via ISO format
+            # Stored as ISO without offset; treat as London local
+            return to_london(datetime.fromisoformat(row["ts"]))
         except Exception:
             return None
     return None
 
 
 def get_latest_created_at_iso() -> str | None:
+    # Return the exact stored string to keep FK/joins stable
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        last = _get_last_generated_at(conn)
-        return last.isoformat(timespec="seconds") if last else None
+        row = conn.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
+        return row["ts"] if row and row["ts"] else None
 
 
 def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
-    now = now or _now()
+    now = to_london(now) if now else _now()
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
@@ -60,7 +68,7 @@ def refresh_weekly_selection() -> None:
     from a rolling window of weekly_results weighted by per-week turnout.
     Preserves the output shape and archiving semantics of the previous version.
     """
-    now_iso = _now().isoformat(timespec="seconds")
+    now_iso = iso_seconds_local(_now())
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -160,7 +168,7 @@ def get_current_week_selection() -> list[dict]:
         last = _get_last_generated_at(conn)
         if not last:
             return []
-        ts = last.isoformat(timespec="seconds")
+        ts = get_latest_created_at_iso()
         # Compute votes from normalized table to avoid any stale counters
         rows = conn.execute(
             (
@@ -201,7 +209,7 @@ def backfill_current_selection_details() -> None:
         last = _get_last_generated_at(conn)
         if not last:
             return
-        ts = last.isoformat(timespec="seconds")
+        ts = get_latest_created_at_iso()
         cur = conn.cursor()
         cur.execute(
             (
@@ -246,7 +254,7 @@ def log_voter(voter_id: str, ip_hash: str, user_agent: str | None, email: str | 
     ts = get_latest_created_at_iso()
     if not ts:
         return
-    now_iso = _now().isoformat(timespec="seconds")
+    now_iso = iso_seconds_local(_now())
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         try:
@@ -283,23 +291,22 @@ def is_voting_open(now: datetime | None = None) -> bool:
         last = _get_last_generated_at(conn)
         if not last:
             return False
-        week_monday = last.date() - timedelta(days=last.weekday())
-        open_start = datetime.combine(week_monday, time(10, 0))
-        close_end = datetime.combine(week_monday + timedelta(days=2), time(23, 0))  # Wed 23:00
-        return open_start <= now <= close_end
+        open_start, close_end = voting_window_london(last)
+        return open_start <= to_london(now) <= close_end
 
 
 def get_voting_window() -> dict:
-    """Return the voting window for the current selection as ISO strings."""
+    """Return the voting window for the current selection as ISO strings (no offset)."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         last = _get_last_generated_at(conn)
         if not last:
             return {"open": None, "close": None}
-        week_monday = last.date() - timedelta(days=last.weekday())
-        open_start = datetime.combine(week_monday, time(10, 0))
-        close_end = datetime.combine(week_monday + timedelta(days=2), time(23, 0))
-        return {"open": open_start.isoformat(timespec="minutes"), "close": close_end.isoformat(timespec="minutes")}
+        open_start, close_end = voting_window_london(last)
+        return {
+            "open": open_start.replace(tzinfo=None).isoformat(timespec="minutes"),
+            "close": close_end.replace(tzinfo=None).isoformat(timespec="minutes"),
+        }
 
 
 def record_vote(option_id: int, voter: dict | None = None) -> bool:
@@ -311,7 +318,13 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
         last = _get_last_generated_at(conn)
         if not last:
             return False
-        ts = last.isoformat(timespec="seconds")
+        # Use the exact stored ISO string for joins and keys
+        with sqlite3.connect(DB_PATH) as _c:
+            _c.row_factory = sqlite3.Row
+            ts_row = _c.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
+            ts = ts_row["ts"] if ts_row and ts_row["ts"] else None
+        if not ts:
+            return False
         cur = conn.cursor()
         email = (voter or {}).get("email") if voter else None
         name = (voter or {}).get("name") if voter else None
@@ -325,7 +338,7 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
                     "INSERT INTO votes (week_created_at, option_id, email, name, picture, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)"
                 ),
-                (ts, option_id, email, name, picture, _now().isoformat(timespec="seconds")),
+                (ts, option_id, email, name, picture, iso_seconds_local(_now())),
             )
             # Increment the denormalized counter for quick reads
             cur.execute(

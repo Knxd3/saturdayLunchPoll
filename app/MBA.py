@@ -1,10 +1,11 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import timedelta
 from .db import get_db_connection
+from .timeutil import now_london, iso_seconds_local
 
 
 def _iso_now_seconds() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return iso_seconds_local(now_london())
 
 
 def update_mab_stats(window_weeks: int = 8) -> list[dict]:
@@ -42,11 +43,10 @@ def update_mab_stats(window_weeks: int = 8) -> list[dict]:
     )
 
     # Rolling window bounds
-    now = datetime.now()
-    window_end = now
+    window_end = now_london()
     window_start = window_end - timedelta(days=7 * max(1, int(window_weeks)))
-    window_start_iso = window_start.isoformat(timespec="seconds")
-    window_end_iso = window_end.isoformat(timespec="seconds")
+    window_start_iso = iso_seconds_local(window_start)
+    window_end_iso = iso_seconds_local(window_end)
 
     # Weighted stats from weekly_results
     stats_rows = cur.execute(

@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, time
+from zoneinfo import ZoneInfo
+
+
+# Single source of truth for local timezone
+LONDON_TZ = ZoneInfo("Europe/London")
+
+
+def now_london() -> datetime:
+    """Current time as an aware datetime in Europe/London."""
+    return datetime.now(LONDON_TZ)
+
+
+def to_london(dt: datetime) -> datetime:
+    """Ensure a datetime is in Europe/London timezone.
+
+    - If `dt` is naive, treat it as Europe/London local time.
+    - If `dt` is aware, convert to Europe/London.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=LONDON_TZ)
+    return dt.astimezone(LONDON_TZ)
+
+
+def iso_seconds_local(dt: datetime) -> str:
+    """ISO string (seconds precision) with Europe/London timezone offset.
+
+    We persist timezone-aware local timestamps so the DB always carries
+    explicit London time including DST (+00:00/+01:00).
+    """
+    return to_london(dt).isoformat(timespec="seconds")
+
+
+def week_monday_london(dt: datetime) -> datetime:
+    """Return Monday 00:00 for the week containing `dt`, in London tz (aware)."""
+    dt_l = to_london(dt)
+    monday_date = dt_l.date() - timedelta(days=dt_l.weekday())
+    return datetime.combine(monday_date, time(0, 0), tzinfo=LONDON_TZ)
+
+
+def next_monday_10_london(after_dt: datetime) -> datetime:
+    """Return Monday 10:00 (London) of the week AFTER the week containing `after_dt`."""
+    week_monday = week_monday_london(after_dt)
+    next_week_monday = week_monday.date() + timedelta(days=7)
+    return datetime.combine(next_week_monday, time(10, 0), tzinfo=LONDON_TZ)
+
+
+def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
+    """Voting window (open, close) for the week containing `dt`, London tz (aware).
+
+    Open: Monday 10:00
+    Close: Wednesday 23:00
+    """
+    week_monday = week_monday_london(dt)
+    open_start = datetime.combine(week_monday.date(), time(10, 0), tzinfo=LONDON_TZ)
+    close_end = datetime.combine(week_monday.date() + timedelta(days=2), time(23, 0), tzinfo=LONDON_TZ)
+    return open_start, close_end
