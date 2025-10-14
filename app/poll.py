@@ -62,22 +62,28 @@ HTML_TEMPLATE = """
   </head>
   <body>
     <div class="wrap">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-      <h1 style = "flex:1; text-align:center; margin:0;">Where should we go for lunch?</h1>
-      {% if session.get('user') %}
-        <div>
-          <img src="{{ session['user']['picture'] }}" alt="profile" style="width:32px; height:32px; border-radius:50%;">
-          <!-- <span style="font-size:0.9rem; margin-right:1rem; margin-left:auto;">{{ session['user']['email'] }}</span> -->
-          <a href="{{ url_for('login.logout') }}" style="color:#2563eb; text-decoration:none;">Logout</a>
-        </div>
-      {% else %}
-        <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
-      {% endif %}
+      <!-- Top-right login/logout -->
+      <div style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
+        {% if session.get('user') %}
+          <div>
+            <img src="{{ session['user']['picture'] }}" alt="profile" style="width:32px; height:32px; border-radius:50%; vertical-align:middle;">
+            <a href="{{ url_for('login.logout') }}" style="color:#2563eb; text-decoration:none; margin-left:0.5rem;">Logout</a>
+          </div>
+        {% else %}
+          <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
+        {% endif %}
       </div>
-      <div class="subtitle">Vote for this week's pick. Options refresh every Monday at 10:00. Voting closes Wednesday 23:00.</div>
-      {% if already_voted %}
-        <div style="padding:10px 12px; color:#fbbf24;">Looks like you already voted this week.</div>
-      {% endif %}
+      
+      <!-- Title + subtitle (grouped together) -->
+      <div style="text-align:center; margin-bottom:1rem;">
+        <h1 style="margin:1rem;">Where should we go for lunch?</h1>
+        <div class="subtitle" style="font-size:0.95rem; color:#555;">
+          Vote for this week's pick. Options refresh every Monday at 10:00. Voting closes Wednesday 23:00.
+        </div>
+        {% if already_voted %}
+          <div style="padding:10px 12px; color:#fbbf24;">Looks like you already voted this week.</div>
+        {% endif %}
+      </div>
       <div class="poll">
         {% if not voting_open %}
           <div style="padding:10px 12px; color:#fca5a5;">Voting is closed for this week.</div>
