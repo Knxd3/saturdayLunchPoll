@@ -83,7 +83,7 @@ def refresh_weekly_selection() -> None:
         ]
         samples.sort(key=lambda x: x[1], reverse=True)
         chosen_names = [name for name, _ in samples[:7]]
-        print(samples[:7])
+        # print(samples[:7])
         if not chosen_names:
             return
 

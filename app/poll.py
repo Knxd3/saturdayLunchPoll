@@ -101,7 +101,6 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="info">
                   {% if opt.get('address') %}<span>Loc: {{ opt['address'] }}</span>{% endif %}
-                  {% if opt.get('cuisine') %}<span>Cuisine: {{ opt['cuisine'] }}</span>{% endif %}
                 </div>
                 <div class="meta">
                   {% if opt.get('cuisine') %}<span class="chip">{{ opt['cuisine'] }}</span>{% endif %}
