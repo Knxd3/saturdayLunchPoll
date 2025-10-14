@@ -19,6 +19,7 @@ def is_admin(email: str | None) -> bool:
         return False
     try:
         with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS admins (email TEXT PRIMARY KEY)")
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT 1 FROM admins WHERE email = ? LIMIT 1", (email,)).fetchone()
             return row is not None

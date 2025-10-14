@@ -6,6 +6,7 @@ import sqlite3
 
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 
+# print(DB_PATH)
 
 def get_db_connection():
     # Increase busy timeout to better tolerate brief concurrent access
