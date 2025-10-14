@@ -23,8 +23,10 @@ def create_app():
 
     from .poll import poll_bp
     from .login import login_bp
+    from .admin import admin_bp
     app.register_blueprint(poll_bp)
     app.register_blueprint(login_bp)
+    app.register_blueprint(admin_bp)
 
     @app.route("/health")
     def health():

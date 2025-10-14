@@ -112,4 +112,14 @@ def init_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vote_unique ON votes(week_created_at, option_id, email)"
     )
     conn.commit()
+    # Admins table for gating /admin access
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admins (
+            email TEXT PRIMARY KEY
+        )
+        """
+    )
+    conn.commit()
     conn.close()

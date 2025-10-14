@@ -170,14 +170,15 @@ def get_current_week_selection() -> list[dict]:
         if not last:
             return []
         ts = get_latest_created_at_iso()
-        # Compute votes from normalized table to avoid any stale counters
+        # Compute votes from normalized table and join restaurants for exclusion flag
         rows = conn.execute(
             (
                 "SELECT ws.id, ws.name, ws.address, ws.cuisine, ws.average_price, ws.rating, ws.reviews, ws.offer, ws.url, "
-                "COALESCE(v.cnt, 0) AS votes "
+                "COALESCE(v.cnt, 0) AS votes, COALESCE(r.is_excluded, 0) AS is_excluded "
                 "FROM weekly_selection ws "
                 "LEFT JOIN (SELECT option_id, COUNT(*) AS cnt FROM votes WHERE week_created_at = ? GROUP BY option_id) v "
                 "ON v.option_id = ws.id "
+                "LEFT JOIN restaurants r ON r.name = ws.name "
                 "WHERE ws.created_at = ?"
             ),
             (ts, ts),
@@ -329,6 +330,17 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
         name = (voter or {}).get("name") if voter else None
         picture = (voter or {}).get("picture") if voter else None
         if not email:
+            return False
+        # Do not allow voting on excluded options (joined by name)
+        ex_row = conn.execute(
+            (
+                "SELECT COALESCE(r.is_excluded, 0) AS ex "
+                "FROM weekly_selection ws LEFT JOIN restaurants r ON r.name = ws.name "
+                "WHERE ws.id = ? AND ws.created_at = ?"
+            ),
+            (option_id, ts),
+        ).fetchone()
+        if not ex_row or int(ex_row["ex"] or 0) == 1:
             return False
         # Try to insert a vote row; unique constraint prevents duplicates per option/email/week
         try:

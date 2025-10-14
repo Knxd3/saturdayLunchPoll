@@ -91,11 +91,11 @@ HTML_TEMPLATE = """
         <form method="POST" action="{{ url_for('poll.vote') }}">
           {% for opt in options %}
             <label class="option">
-              <input type="checkbox" name="option_ids" value="{{ opt['id'] }}" {% if not can_vote %}disabled{% endif %}>
+              <input type="checkbox" name="option_ids" value="{{ opt['id'] }}" {% if not can_vote or opt.get('is_excluded') %}disabled{% endif %}>
               <div>
                 <div class="toprow">
                   <div class="rank">#{{ loop.index }}</div>
-                  <div class="name">{{ opt['name'] }}</div>
+                  <div class="name">{{ opt['name'] }}{% if opt.get('is_excluded') %} <span class="chip">Excluded</span>{% endif %}</div>
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
                     {% for v in opt.get('voters', []) %}
                       {% if v.get('picture') %}
