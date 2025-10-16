@@ -482,7 +482,6 @@ con.execute("DROP TABLE votes")
 
 
 # %%
-# drop the tables and test synthetic data
 import sqlite3
 import numpy as np
 import pandas as pd
@@ -671,4 +670,8 @@ for row in con.execute("""
     LIMIT 50
 """):
     print(tuple(row))
+# %%
+
+",".join(["?"] * len(['chosen_names', 'b']))
+
 # %%

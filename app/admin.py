@@ -77,6 +77,7 @@ def admin_home():
         button.toggle[data-on=\"1\"] { background:#fee2e2; border-color:#fecaca; color:#991b1b; }
         button.toggle[data-on=\"0\"] { background:#dcfce7; border-color:#bbf7d0; color:#065f46; }
       </style>
+      <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js\"></script>
     </head>
     <body>
       <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;\">
@@ -85,6 +86,13 @@ def admin_home():
           <a href=\"{{ url_for('poll.show_poll') }}\">Back to poll</a>
           <span style=\"margin:0 8px; color:#9ca3af;\">|</span>
           <a href=\"{{ url_for('login.logout') }}\">Logout</a>
+        </div>
+      </div>
+      <div style=\"border:1px solid #e5e7eb; border-radius:12px; padding:12px 16px; margin: 16px 0; background:#fff;\">
+        <h3 style=\"margin:6px 0 6px;\">Posterior Evolution (weekly)</h3>
+        <div style=\"color:#6b7280; font-size: 13px;\">Solid line: posterior mean. Shaded band: 95% credible interval.</div>
+        <div style=\"height:420px; margin-top:8px;\">
+          <canvas id=\"mabChart\"></canvas>
         </div>
       </div>
       <table>
@@ -114,6 +122,109 @@ def admin_home():
         </tbody>
       </table>
       <script>
+      (async function renderMabChart() {
+        try {
+          const resp = await fetch("{{ url_for('admin.mab_history_json') }}");
+          const payload = await resp.json();
+          const series = payload.series || [];
+          const names = (payload.names || []).slice();
+          if (!series.length || !names.length) return;
+
+          const labels = series.map(p => p.week);
+
+          const colors = [
+            '#2563eb', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#10b981', '#f97316', '#22c55e', '#e11d48', '#14b8a6',
+            '#6366f1', '#84cc16', '#dc2626', '#a855f7', '#0ea5e9', '#d97706', '#16a34a'
+          ];
+          const rgba = (hex, alpha=0.18) => {
+            const m = hex.replace('#','');
+            const r = parseInt(m.substring(0,2),16), g=parseInt(m.substring(2,4),16), b=parseInt(m.substring(4,6),16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          };
+
+          const datasets = [];
+          names.forEach((nm, idx) => {
+            const color = colors[idx % colors.length];
+            const mean = series.map(p => (p[`${nm}_mean`] ?? null));
+            const lo = series.map(p => (p[`${nm}_lo`] ?? null));
+            const hi = series.map(p => {
+              const l = p[`${nm}_lo`];
+              const b = p[`${nm}_band`];
+              if (l == null || b == null) return null;
+              return l + b;
+            });
+
+            // lower bound (invisible line, base for fill)
+            datasets.push({
+              label: `${nm} lo`,
+              data: lo,
+              borderColor: 'rgba(0,0,0,0)',
+              backgroundColor: 'rgba(0,0,0,0)',
+              pointRadius: 0,
+              borderWidth: 0,
+              spanGaps: true,
+              yAxisID: 'y',
+            });
+
+            // upper bound (filled to previous => shaded band)
+            datasets.push({
+              label: `${nm} 95% CI`,
+              data: hi,
+              borderColor: 'rgba(0,0,0,0)',
+              backgroundColor: rgba(color, 0.18),
+              fill: '-1',
+              pointRadius: 0,
+              borderWidth: 0,
+              spanGaps: true,
+              yAxisID: 'y',
+            });
+
+            // mean line
+            datasets.push({
+              label: `${nm} mean`,
+              data: mean,
+              borderColor: color,
+              backgroundColor: color,
+              fill: false,
+              pointRadius: 0,
+              borderWidth: 2,
+              spanGaps: true,
+              yAxisID: 'y',
+            });
+          });
+
+          const ctx = document.getElementById('mabChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+              responsive: true,
+              interaction: { mode: 'index', intersect: false },
+              stacked: false,
+              plugins: {
+                legend: { position: 'top' },
+                tooltip: { enabled: true }
+              },
+              scales: {
+                x: {
+                  // use category labels (ISO strings)
+                  ticks: { maxRotation: 0 },
+                },
+                y: {
+                  beginAtZero: true,
+                  suggestedMax: 1,
+                  min: 0,
+                  max: 1,
+                  title: { display: true, text: 'p' }
+                }
+              }
+            }
+          });
+        } catch (e) {
+          console.error('Failed to render MAB chart', e);
+        }
+      })();
+
       async function toggle(name, btn, td) {
         btn.disabled = true;
         try {
@@ -173,3 +284,42 @@ def toggle_restaurant():
         conn.commit()
     return jsonify({"ok": True, "is_excluded": int(new_val)})
 
+
+@admin_bp.route("/mab_history.json")
+def mab_history_json():
+    user = session.get("user") or {}
+    email = user.get("email")
+    if not is_admin(email):
+        abort(403)
+    try:
+        from .mab_history import build_weekly_posteriors, build_chart_series
+        import random
+        rows = build_weekly_posteriors()
+
+        # Compute top-5 by total votes across history; break ties randomly
+        top_names: list[str] = []
+        try:
+            with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                conn.row_factory = sqlite3.Row
+                totals = conn.execute(
+                    "SELECT name, SUM(COALESCE(votes,0)) AS tot FROM weekly_results GROUP BY name"
+                ).fetchall()
+                shuffled = list(totals)
+                random.shuffle(shuffled)
+                shuffled.sort(key=lambda r: int(r["tot"] or 0), reverse=True)
+                top_names = [r["name"] for r in shuffled[:5]]
+        except Exception:
+            pass
+
+        if not top_names:
+            # Fallback: pick up to 5 names from rows (random order)
+            all_names = sorted({r.name for r in rows})
+            random.shuffle(all_names)
+            top_names = all_names[:5]
+
+        # Filter rows and build series only for top names
+        rows = [r for r in rows if r.name in top_names]
+        series = build_chart_series(rows)
+        return jsonify({"series": series, "names": top_names})
+    except Exception as e:
+        return jsonify({"series": [], "names": [], "error": str(e)}), 500
