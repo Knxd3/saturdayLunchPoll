@@ -62,8 +62,8 @@ def _fetch_weekly_votes_frame(conn: sqlite3.Connection, window_start_iso: str | 
 def build_weekly_posteriors(
     window_weeks: int = 200,
     half_life_weeks: int = 26,
-    alpha0: float = 1.0,
-    beta0: float = 1.0,
+    alpha0: float = 1.0, # increase to narrow CI and underweigh the evidence; change acf below to narrow CI and overweigh the evidence
+    beta0: float = 1.0, # increase to narrow CI and underweigh the evidence; change acf below to narrow CI and overweigh the evidence
 ) -> List[PosteriorRow]:
     """Compute weekly posterior snapshots for each restaurant.
 
@@ -97,8 +97,13 @@ def build_weekly_posteriors(
 
     # Fill weekly trial counts fallback and ensure numeric types
     df["trials"] = df["trials"].fillna(df.groupby("week_created_at")["votes"].transform("sum"))
-    df["votes"] = df["votes"].astype(float)
-    df["trials"] = df["trials"].astype(float)
+    
+    # Inflate the evidence for narrower confidence bands?
+    # change acf below to narrow CI and overweigh the evidence
+    # E[v/r] =  E[v] * p(r); 
+    acf = 9
+    df["votes"] = df["votes"].astype(float) * acf
+    df["trials"] = df["trials"].astype(float) * acf
 
     # Unique timeline of weeks to snapshot (sorted)
     timeline = (
@@ -147,8 +152,8 @@ def build_weekly_posteriors(
 
         # Credible interval (95%); tolerate numeric issues
         try:
-            agg["lower"] = sp_beta.ppf(0.025, agg["alpha"], agg["beta"])  # type: ignore[arg-type]
-            agg["upper"] = sp_beta.ppf(0.975, agg["alpha"], agg["beta"])  # type: ignore[arg-type]
+            agg["lower"] = sp_beta.ppf(0.05, agg["alpha"], agg["beta"])  # type: ignore[arg-type]
+            agg["upper"] = sp_beta.ppf(0.95, agg["alpha"], agg["beta"])  # type: ignore[arg-type]
         except Exception:
             agg["lower"] = np.nan
             agg["upper"] = np.nan

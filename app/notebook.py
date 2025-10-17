@@ -490,8 +490,11 @@ import os
 os.getcwd()
 con = sqlite3.connect("c:\\Users\\alexa\\Documents\\Personal\\Projects\\saturdayLunchPoll\\database.db")
 # pd.read_sql("SELECT * FROM weekly_selection", con)
-pd.read_sql("SELECT * FROM weekly_results", con)
+# pd.read_sql("SELECT * FROM weekly_results", con)
 # pd.read_sql("SELECT * FROM votes", con)
+
+
+pd.read_sql("SELECT * FROM weekly_results WHERE votes = (SELECT MAX(votes) FROM weekly_results)", con)
 
 
 
@@ -673,5 +676,24 @@ for row in con.execute("""
 # %%
 
 ",".join(["?"] * len(['chosen_names', 'b']))
+
+# %%
+
+lo, hi = (1,5) if 1 else (2,4)
+
+print(lo)
+
+print(hi)
+
+
+a = {}
+a['a'] = 1
+a['b'] = 4
+a['c'] = 9
+
+import numpy as np
+
+np.array(list(a.values()))/ 14
+
 
 # %%

@@ -78,6 +78,8 @@ def admin_home():
         button.toggle[data-on=\"0\"] { background:#dcfce7; border-color:#bbf7d0; color:#065f46; }
       </style>
       <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js\"></script>
+      <script src=\"https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js\"></script>
+      <script src=\"https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3\"></script>
     </head>
     <body>
       <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;\">
@@ -89,10 +91,23 @@ def admin_home():
         </div>
       </div>
       <div style=\"border:1px solid #e5e7eb; border-radius:12px; padding:12px 16px; margin: 16px 0; background:#fff;\">
-        <h3 style=\"margin:6px 0 6px;\">Posterior Evolution (weekly)</h3>
-        <div style=\"color:#6b7280; font-size: 13px;\">Solid line: posterior mean. Shaded band: 95% credible interval.</div>
-        <div style=\"height:420px; margin-top:8px;\">
-          <canvas id=\"mabChart\"></canvas>
+        <div>
+          <h3 style=\"margin:6px 0 6px;\">Posterior Evolution (weekly)</h3>
+          <div style=\"color:#6b7280; font-size: 13px;\">Solid line: posterior mean. Shaded band: 5%–95% credible interval.</div>
+        </div>
+        <div style=\"display:grid; grid-template-columns: 1fr 280px; gap:16px; align-items:start; margin-top:8px;\">
+          <div style=\"height:420px;\">
+            <canvas id=\"mabChart\"></canvas>
+          </div>
+          <div style=\"display:flex; flex-direction:column;\">
+            <label for=\"restaurantSelect\" style=\"font-size:12px; color:#6b7280; margin-bottom:4px;\">Restaurants (total votes)</label>
+            <select id=\"restaurantSelect\" multiple size=\"10\" style=\"min-width:260px; height:100%; padding:6px; border:1px solid #d1d5db; border-radius:8px; background:#fff;\"></select>
+            <div style=\"margin-top:6px; font-size:12px; color:#6b7280;\">Tip: select up to 12 restaurants.</div>
+            <label style=\"font-size:13px; color:#374151; display:flex; align-items:center; gap:6px; margin-top:8px;\">
+              <input id=\"toggleBands\" type=\"checkbox\" checked />
+              <span>Show credible bands</span>
+            </label>
+          </div>
         </div>
       </div>
       <table>
@@ -127,7 +142,8 @@ def admin_home():
           const resp = await fetch("{{ url_for('admin.mab_history_json') }}");
           const payload = await resp.json();
           const series = payload.series || [];
-          const names = (payload.names || []).slice();
+          const names = (payload.names || []).slice(); // all names available
+          const defaultNames = (payload.default || names.slice(0,10)).slice();
           if (!series.length || !names.length) return;
 
           const labels = series.map(p => p.week);
@@ -136,78 +152,98 @@ def admin_home():
             '#2563eb', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#10b981', '#f97316', '#22c55e', '#e11d48', '#14b8a6',
             '#6366f1', '#84cc16', '#dc2626', '#a855f7', '#0ea5e9', '#d97706', '#16a34a'
           ];
-          const rgba = (hex, alpha=0.18) => {
+          const rgba = (hex, alpha=0.10) => {
             const m = hex.replace('#','');
             const r = parseInt(m.substring(0,2),16), g=parseInt(m.substring(2,4),16), b=parseInt(m.substring(4,6),16);
             return `rgba(${r}, ${g}, ${b}, ${alpha})`;
           };
 
-          const datasets = [];
-          names.forEach((nm, idx) => {
-            const color = colors[idx % colors.length];
-            const mean = series.map(p => (p[`${nm}_mean`] ?? null));
-            const lo = series.map(p => (p[`${nm}_lo`] ?? null));
-            const hi = series.map(p => {
-              const l = p[`${nm}_lo`];
-              const b = p[`${nm}_band`];
-              if (l == null || b == null) return null;
-              return l + b;
+          // Populate restaurant select with totals (all names, sorted by total desc)
+          const select = document.getElementById('restaurantSelect');
+          const totals = payload.totals || {};
+          const sortedNames = [...names].sort((a,b) => (totals[b]||0) - (totals[a]||0));
+          if (select) {
+            sortedNames.forEach(nm => {
+              const opt = document.createElement('option');
+              opt.value = nm;
+              opt.textContent = `${nm} (${totals[nm] ?? 0})`;
+              opt.selected = defaultNames.includes(nm);
+              select.appendChild(opt);
             });
+          }
 
-            // lower bound (invisible line, base for fill)
-            datasets.push({
-              label: `${nm} lo`,
-              data: lo,
-              borderColor: 'rgba(0,0,0,0)',
-              backgroundColor: 'rgba(0,0,0,0)',
-              pointRadius: 0,
-              borderWidth: 0,
-              spanGaps: true,
-              yAxisID: 'y',
-            });
+          const hashColorIdx = (s) => {
+            let h = 0; for (let i=0;i<s.length;i++) { h = (h*31 + s.charCodeAt(i))|0; }
+            return Math.abs(h) % colors.length;
+          };
 
-            // upper bound (filled to previous => shaded band)
-            datasets.push({
-              label: `${nm} 95% CI`,
-              data: hi,
-              borderColor: 'rgba(0,0,0,0)',
-              backgroundColor: rgba(color, 0.18),
-              fill: '-1',
-              pointRadius: 0,
-              borderWidth: 0,
-              spanGaps: true,
-              yAxisID: 'y',
+          const buildDatasets = (selNames) => {
+            const ds = [];
+            selNames.forEach((nm) => {
+              const color = colors[hashColorIdx(nm)];
+              const mean = series.map(p => (p[`${nm}_mean`] ?? null));
+              const lo = series.map(p => (p[`${nm}_lo`] ?? null));
+              const hi = series.map(p => {
+                const l = p[`${nm}_lo`];
+                const b = p[`${nm}_band`];
+                if (l == null || b == null) return null;
+                return l + b;
+              });
+              ds.push({
+                label: `${nm} 5%`,
+                data: lo,
+                borderColor: 'rgba(0,0,0,0)',
+                backgroundColor: 'rgba(0,0,0,0)',
+                pointRadius: 0,
+                borderWidth: 0,
+                spanGaps: true,
+                yAxisID: 'y',
+                isBand: true,
+              });
+              ds.push({
+                label: `${nm} 95%`,
+                data: hi,
+                borderColor: 'rgba(0,0,0,0)',
+                backgroundColor: rgba(color, 0.10),
+                fill: '-1',
+                pointRadius: 0,
+                borderWidth: 0,
+                spanGaps: true,
+                yAxisID: 'y',
+                isBand: true,
+              });
+              ds.push({
+                label: `${nm} mean`,
+                data: mean,
+                borderColor: color,
+                backgroundColor: color,
+                fill: false,
+                pointRadius: 0,
+                borderWidth: 2,
+                spanGaps: true,
+                yAxisID: 'y',
+              });
             });
-
-            // mean line
-            datasets.push({
-              label: `${nm} mean`,
-              data: mean,
-              borderColor: color,
-              backgroundColor: color,
-              fill: false,
-              pointRadius: 0,
-              borderWidth: 2,
-              spanGaps: true,
-              yAxisID: 'y',
-            });
-          });
+            return ds;
+          };
 
           const ctx = document.getElementById('mabChart').getContext('2d');
-          new Chart(ctx, {
+          let selectedNames = defaultNames;
+          const chart = new Chart(ctx, {
             type: 'line',
-            data: { labels, datasets },
+            data: { labels, datasets: buildDatasets(selectedNames) },
             options: {
               responsive: true,
               interaction: { mode: 'index', intersect: false },
               stacked: false,
               plugins: {
-                legend: { position: 'top' },
+                legend: { display: false },
                 tooltip: { enabled: true }
               },
               scales: {
                 x: {
-                  // use category labels (ISO strings)
+                  type: 'time',
+                  time: { unit: 'week', tooltipFormat: 'PP' },
                   ticks: { maxRotation: 0 },
                 },
                 y: {
@@ -220,6 +256,47 @@ def admin_home():
               }
             }
           });
+
+          // Wire up toggle for credible bands
+          const bandToggle = document.getElementById('toggleBands');
+          const applyBandVisibility = () => {
+            const show = bandToggle ? bandToggle.checked : true;
+            chart.data.datasets.forEach(ds => {
+              if (ds.isBand) ds.hidden = !show;
+            });
+            chart.update('none');
+          };
+          if (bandToggle) {
+            bandToggle.addEventListener('change', applyBandVisibility);
+            applyBandVisibility();
+          }
+
+          // Selection handling
+          const cap = 12;
+          let prevSelected = new Set(selectedNames);
+          const getSelectedNames = () => {
+            if (!select) return sortedNames;
+            return Array.from(select.selectedOptions).map(o => o.value);
+          };
+          if (select) {
+            select.addEventListener('change', () => {
+              const current = getSelectedNames();
+              if (current.length > cap) {
+                // determine which option was added; revert it
+                const added = current.find(v => !prevSelected.has(v));
+                // if we can't find the added one, just trim extras
+                const toDeselect = added || current[current.length - 1];
+                Array.from(select.options).forEach(opt => {
+                  if (opt.value === toDeselect) opt.selected = false;
+                });
+                return; // wait for next change event
+              }
+              selectedNames = current;
+              prevSelected = new Set(selectedNames);
+              chart.data.datasets = buildDatasets(selectedNames);
+              applyBandVisibility();
+            });
+          }
         } catch (e) {
           console.error('Failed to render MAB chart', e);
         }
@@ -296,30 +373,38 @@ def mab_history_json():
         import random
         rows = build_weekly_posteriors()
 
-        # Compute top-5 by total votes across history; break ties randomly
-        top_names: list[str] = []
+        # Build totals for ALL restaurants and compute default (top-10) list
+        totals_map: dict[str, int] = {}
+        all_names_sorted: list[str] = []
+        default_top: list[str] = []
         try:
             with sqlite3.connect(DB_PATH, timeout=30) as conn:
                 conn.row_factory = sqlite3.Row
-                totals = conn.execute(
+                totals_rows = conn.execute(
                     "SELECT name, SUM(COALESCE(votes,0)) AS tot FROM weekly_results GROUP BY name"
                 ).fetchall()
-                shuffled = list(totals)
+                totals_map = {r["name"]: int(r["tot"] or 0) for r in totals_rows}
+                # All names sorted by totals desc, then name
+                all_names_sorted = [r["name"] for r in sorted(totals_rows, key=lambda r: (-(int(r["tot"] or 0)), r["name"]))]
+                # Default top-10 with random tie-breaking
+                shuffled = list(totals_rows)
                 random.shuffle(shuffled)
                 shuffled.sort(key=lambda r: int(r["tot"] or 0), reverse=True)
-                top_names = [r["name"] for r in shuffled[:5]]
+                default_top = [r["name"] for r in shuffled[:10]]
         except Exception:
-            pass
+            # Fallback from computed rows if DB totals query fails
+            all_names_sorted = sorted({r.name for r in rows})
+            random.shuffle(all_names_sorted)
+            default_top = all_names_sorted[:10]
+            totals_map = {nm: 0 for nm in all_names_sorted}
 
-        if not top_names:
-            # Fallback: pick up to 5 names from rows (random order)
-            all_names = sorted({r.name for r in rows})
-            random.shuffle(all_names)
-            top_names = all_names[:5]
-
-        # Filter rows and build series only for top names
-        rows = [r for r in rows if r.name in top_names]
+        # Build series for ALL rows; client selects subset
         series = build_chart_series(rows)
-        return jsonify({"series": series, "names": top_names})
+        return jsonify({
+            "series": series,
+            "names": all_names_sorted,
+            "default": default_top,
+            "totals": totals_map,
+        })
     except Exception as e:
         return jsonify({"series": [], "names": [], "error": str(e)}), 500

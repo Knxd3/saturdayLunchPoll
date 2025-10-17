@@ -77,10 +77,24 @@ def refresh_weekly_selection() -> None:
         stats = update_mab_stats()
         if not stats:
             return
-        samples = [
-            (row["name"], random.betavariate(max(1e-6, float(row["alpha"])), max(1e-6, float(row["beta"]))))
-            for row in stats
-        ]
+        # Thompson sampling with clipped Beta sample to reduce extreme randomness
+        try:
+            from scipy.stats import beta as sp_beta
+        except Exception:
+            sp_beta = None  # type: ignore
+
+        samples = []
+        for row in stats:
+            a = max(1e-6, float(row.get("alpha", 1.0)))
+            b = max(1e-6, float(row.get("beta", 1.0)))
+            p = random.betavariate(a, b)
+            if sp_beta is not None:
+                # Clip to central 90% interval (5%..95%) to dampen variance
+                lo = float(sp_beta.ppf(0.05, a, b))
+                hi = float(sp_beta.ppf(0.95, a, b))
+                if lo <= hi:
+                    p = min(max(p, lo), hi)
+            samples.append((row["name"], p))
         samples.sort(key=lambda x: x[1], reverse=True)
         chosen_names = [name for name, _ in samples[:7]]
         # print(samples[:7])
