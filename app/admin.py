@@ -60,6 +60,13 @@ def admin_home():
         except Exception:
             rows = []
 
+    # Ensure a CSRF token exists for admin actions
+    import secrets as _secrets
+    csrf_token = session.get("csrf_token")
+    if not csrf_token:
+        csrf_token = _secrets.token_urlsafe(32)
+        session["csrf_token"] = csrf_token
+
     html = """
     <!doctype html>
     <html>
@@ -297,6 +304,13 @@ def admin_home():
               applyBandVisibility();
             });
           }
+
+          // Attach CSRF header to admin POSTs in this page
+          const csrfToken = "{{ csrf_token }}";
+          window.__adminFetch = (url, opts = {}) => {
+            const headers = Object.assign({ 'X-CSRF-Token': csrfToken }, opts.headers || {});
+            return fetch(url, Object.assign({}, opts, { headers }));
+          };
         } catch (e) {
           console.error('Failed to render MAB chart', e);
         }
@@ -305,7 +319,7 @@ def admin_home():
       async function toggle(name, btn, td) {
         btn.disabled = true;
         try {
-          const resp = await fetch("{{ url_for('admin.toggle_restaurant') }}", {
+          const resp = await window.__adminFetch("{{ url_for('admin.toggle_restaurant') }}", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ name })

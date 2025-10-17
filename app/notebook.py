@@ -697,3 +697,14 @@ np.array(list(a.values()))/ 14
 
 
 # %%
+import sqlite3
+import numpy as np
+import pandas as pd
+import os
+
+os.getcwd()
+con = sqlite3.connect("c:\\Users\\alexa\\Documents\\Personal\\Projects\\saturdayLunchPoll\\database.db")
+pd.read_sql("SELECT * FROM weekly_selection", con)
+# pd.read_sql("SELECT * FROM weekly_results", con)
+# pd.read_sql("SELECT * FROM votes", con)
+# %%
