@@ -4,6 +4,7 @@ import hashlib
 import random
 from datetime import datetime
 from .MBA import update_mab_stats
+from scipy.stats import beta as sp_beta
 from .timeutil import (
     now_london,
     to_london,
@@ -78,20 +79,16 @@ def refresh_weekly_selection() -> None:
         if not stats:
             return
         # Thompson sampling with clipped Beta sample to reduce extreme randomness
-        try:
-            from scipy.stats import beta as sp_beta
-        except Exception:
-            sp_beta = None  # type: ignore
-
+        
         samples = []
         for row in stats:
             a = max(1e-6, float(row.get("alpha", 1.0)))
             b = max(1e-6, float(row.get("beta", 1.0)))
             p = random.betavariate(a, b)
             if sp_beta is not None:
-                # Clip to central 90% interval (5%..95%) to dampen variance
-                lo = float(sp_beta.ppf(0.05, a, b))
-                hi = float(sp_beta.ppf(0.95, a, b))
+                # Clip to central 95% interval (2.5%..97.5%) to dampen variance
+                lo = float(sp_beta.ppf(0.025, a, b))
+                hi = float(sp_beta.ppf(0.975, a, b))
                 if lo <= hi:
                     p = min(max(p, lo), hi)
             samples.append((row["name"], p))
@@ -198,6 +195,65 @@ def get_current_week_selection() -> list[dict]:
             (ts, ts),
         ).fetchall()
         options = [dict(r) for r in rows]
+        # Compute derived display fields (e.g., Net Average from average_price and offer, beta credible interval)
+        import re
+        def _parse_price(val: str | None) -> float | None:
+            if not val:
+                return None
+            s = str(val)
+            m = re.search(r"(\d+(?:[\.,]\d+)?)", s)
+            if not m:
+                return None
+            num = m.group(1).replace(',', '.')
+            try:
+                return float(num)
+            except Exception:
+                return None
+        def _parse_percent(val) -> float | None:
+            if val is None:
+                return None
+            s = str(val)
+            m = re.search(r"(\d+(?:[\.,]\d+)?)", s)
+            if not m:
+                return None
+            num = m.group(1).replace(',', '.')
+            try:
+                v = float(num)
+            except Exception:
+                return None
+            # Treat values > 1 as percent (e.g., 20 means 20%), else already fraction
+            return v/100.0 if v > 1.0 else v
+        for opt in options:
+            price = _parse_price(opt.get('average_price'))
+            pct = _parse_percent(opt.get('offer'))
+            try:
+                rating = float(opt.get('rating'))
+            except Exception:
+                return None
+            try:
+                reviews = int(opt.get('reviews'))
+            except Exception:
+                return None
+            if price is not None and pct is not None:
+                net = max(0.0, price * (1.0 - pct))
+                opt['net_average'] = net
+            
+            if rating is not None and reviews is not None:
+                max_rating = 10
+                s = rating / max_rating * reviews 
+                prior_alpha = 1.0
+                prior_beta = 1.0
+                posterior_alpha = (prior_alpha + s)
+                posterior_beta = (prior_beta + reviews - s)
+                posterior_mean = max_rating * posterior_alpha / (posterior_alpha + posterior_beta)
+                    
+                qlo5 = max_rating * sp_beta.ppf(0.025, posterior_alpha, posterior_beta)
+                qhi5 = max_rating * sp_beta.ppf(0.975, posterior_alpha, posterior_beta)
+
+                opt['posterior_mean'] = posterior_mean
+                opt['qlo5'] = qlo5
+                opt['qhi5'] = qhi5
+
         # Attach voter profiles per option from normalized votes table
         vote_rows = conn.execute(
             (
@@ -213,6 +269,29 @@ def get_current_week_selection() -> list[dict]:
             )
         for opt in options:
             opt["voters"] = voters_by_option.get(opt["id"], [])
+        # # Optional: inject dummy voters for preview (set PREVIEW_DUMMY_VOTERS=1)
+        # import os as _os
+        # # if _os.environ.get("PREVIEW_DUMMY_VOTERS") == "1":
+        # if 1:
+        #     dummy_pool = [
+        #         {"email": "alice@example.com", "name": "Alice", "picture": "https://i.pravatar.cc/28?img=1"},
+        #         {"email": "bob@example.com", "name": "Bob", "picture": "https://i.pravatar.cc/28?img=2"},
+        #         {"email": "carol@example.com", "name": "Carol", "picture": "https://i.pravatar.cc/28?img=3"},
+        #         {"email": "dave@example.com", "name": "Dave", "picture": "https://i.pravatar.cc/28?img=4"},
+        #         {"email": "eve@example.com", "name": "Eve", "picture": "https://i.pravatar.cc/28?img=5"},
+        #     ]
+        #     for opt in options:
+        #         current = list(opt.get("voters") or [])
+        #         # If there are no voters yet, add a few dummies so avatars render
+        #         if not current:
+        #             k = 3
+        #             current = dummy_pool[:k]
+        #         opt["voters"] = current
+        #         # Keep vote chip from looking empty when avatars show
+        #         try:
+        #             opt["votes"] = max(int(opt.get("votes") or 0), len(current))
+        #         except Exception:
+        #             pass
         return options
 
 

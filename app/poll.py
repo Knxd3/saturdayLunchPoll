@@ -3,6 +3,10 @@ Poll routes.
 """
 import uuid
 from flask import Blueprint, render_template_string, request, redirect, url_for, make_response, session
+import re
+from datetime import timedelta
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from .timeutil import now_london, week_monday_london
 from .poll_manager import (
     ensure_weekly_selection,
     get_current_week_selection,
@@ -32,32 +36,50 @@ HTML_TEMPLATE = """
       --text: #111827;
       --chip: #f3f4f6;
       --chip-border: #e5e7eb;
+      --chip-accent-bg: #eef2ff;
+      --chip-accent-border: #bfdbfe;
+      --chip-accent-text: #1e3a8a;
       --border: #e5e7eb;
       --shadow: 0 6px 24px rgba(0,0,0,0.08);
     }
     * { box-sizing: border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
     .wrap { max-width: 920px; margin: 0 auto; padding: 32px 16px 48px; }
-    .title { text-align:center; margin-bottom: 8px; font-size: 28px; letter-spacing: 0.2px; }
     .subtitle { text-align:center; margin: 0 auto 24px; max-width: 720px; color: var(--muted); font-size: 14px; }
     .poll { background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 16px; padding: 16px; }
     form { display:grid; grid-template-columns: 1fr; gap: 12px; }
-    .option { display:flex; gap:12px; padding:14px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
+    .option { position:relative; display:flex; gap:12px; padding:14px 14px 10px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
     .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
     .option:active { transform: translateY(1px); }
     .option input { margin-top: 4px; accent-color: var(--accent-strong); flex: 0 0 auto; }
     .option > div { flex: 1 1 auto; min-width: 0; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .chip-accent { background: var(--chip-accent-bg); border-color: var(--chip-accent-border); color: var(--chip-accent-text); }
+    .chip-value  { background:#ecfdf5; border-color:#a7f3d0; color:#065f46; }
     .name { font-weight: 700; letter-spacing:.2px; }
     .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:12px; }
     .toprow { display:flex; align-items:center; gap:10px; }
-    .rank { width: 28px; height: 28px; border-radius: 999px; background: #111827; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; }
-    .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; }
+    .rank { width: 34px; height: 15px; border-radius: 6px; background: var(--chip); border:1px solid var(--chip-border); color: var(--muted); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:11px; }
+    .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; cursor:pointer; }
+    .votes:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .voter-popup { position:absolute; top:36px; right:14px; z-index:20; background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 10px; padding:10px 12px; width:220px; display:none; }
+    .voter-popup.open { display:block; }
+    .voter-popup h4 { margin:0 0 8px; font-size:13px; font-weight:600; color:var(--text); }
+    .voter-popup-list { list-style:none; margin:0; padding:0; max-height:180px; overflow-y:auto; }
+    .voter-popup-list li { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; color:var(--text); }
+    .voter-popup-list img { width:28px; height:28px; border-radius:50%; border:1px solid var(--border); object-fit:cover; }
+    .avatar-fallback { width:28px; height:28px; border-radius:50%; background: var(--chip); border:1px solid var(--chip-border); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--muted); }
+    .voter-popup-empty { font-size:12px; color:var(--muted); }
+    .voter-popup-close { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
+    .voter-popup-close:hover { color:var(--accent); }
     .vote { margin-top: 16px; display:flex; justify-content:center; }
     .vote button { background: var(--accent-strong); color: #fff; border:none; padding: 10px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
     a.link { color: var(--accent); text-decoration: none; }
     a.link:hover { text-decoration: underline; }
+    /* Title link should look like plain text; only indicate on hover */
+    .name a, .name a.link { color: inherit; text-decoration: none; }
+    .name a:hover, .name a.link:hover { color: inherit; text-decoration: underline; }
   </style>
   </head>
   <body>
@@ -73,8 +95,8 @@ HTML_TEMPLATE = """
           <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
         {% endif %}
       </div>
-      
-      <!-- Title + subtitle (grouped together) -->
+
+      <!-- Title + subtitle -->
       <div style="text-align:center; margin-bottom:1rem;">
         <h1 style="margin:1rem;">Where should we go for lunch?</h1>
         <div class="subtitle" style="font-size:0.95rem; color:#555;">
@@ -84,6 +106,7 @@ HTML_TEMPLATE = """
           <div style="padding:10px 12px; color:#fbbf24;">Looks like you already voted this week.</div>
         {% endif %}
       </div>
+
       <div class="poll">
         {% if not voting_open %}
           <div style="padding:10px 12px; color:#fca5a5;">Voting is closed for this week.</div>
@@ -95,26 +118,70 @@ HTML_TEMPLATE = """
               <div>
                 <div class="toprow">
                   <div class="rank">#{{ loop.index }}</div>
-                  <div class="name">{{ opt['name'] }}{% if opt.get('is_excluded') %} <span class="chip">Excluded</span>{% endif %}</div>
+                  <div class="name">
+                    {% if opt.get('url') %}
+                      <a target="_blank" class="link" href="{{ opt['url'] }}">{{ opt['name'] }}</a>
+                    {% else %}
+                      {{ opt['name'] }}
+                    {% endif %}
+                    {% if opt.get('is_excluded') %} <span class="chip">Excluded</span>{% endif %}
+                  </div>
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
-                    {% for v in opt.get('voters', []) %}
-                      {% if v.get('picture') %}
-                        <img src="{{ v['picture'] }}" alt="{{ v.get('name') or v.get('email') }}" title="{{ v.get('name') or v.get('email') }}" style="width:18px; height:18px; border-radius:50%; border:1px solid #e5e7eb;" />
-                      {% endif %}
-                    {% endfor %}
-                    <span class="votes" title="{{ (opt.get('voters') or []) | map(attribute='name') | join(', ') }}">{{ opt['votes'] }} votes</span>
+                    <button type="button" class="votes" data-target="voters-{{ opt['id'] }}">{{ opt['votes'] }} votes</button>
                   </div>
                 </div>
-                <div class="info">
-                  {% if opt.get('address') %}<span>Loc: {{ opt['address'] }}</span>{% endif %}
+                <div class="voter-popup" id="voters-{{ opt['id'] }}" role="dialog" aria-hidden="true">
+                  <button type="button" class="voter-popup-close" data-target="voters-{{ opt['id'] }}" aria-label="Close">×</button>
+                  <h4>Votes</h4>
+                  {% if opt.get('voters') %}
+                    <ul class="voter-popup-list">
+                      {% for v in opt.get('voters', []) %}
+                        <li>
+                          {% if v.get('picture') %}
+                            <img src="{{ v['picture'] }}" alt="{{ v.get('name') or v.get('email') }}">
+                          {% else %}
+                            <div class="avatar-fallback">{{ (v.get('name') or v.get('email') or '?')[0]|upper }}</div>
+                          {% endif %}
+                          <span>{{ v.get('name') or v.get('email') }}</span>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <div class="voter-popup-empty">No votes yet.</div>
+                  {% endif %}
                 </div>
+
+                <div class="info">
+                  {% if opt.get('address') %}<span>{{ opt['address'] }}</span>{% endif %}
+                </div>
+
                 <div class="meta">
+                  <!-- Row 1: Cuisine -->
                   {% if opt.get('cuisine') %}<span class="chip">{{ opt['cuisine'] }}</span>{% endif %}
-                  {% if opt.get('rating') %}<span class="chip">Rating: {{ opt['rating'] }}</span>{% endif %}
-                  {% if opt.get('reviews') %}<span class="chip">Reviews: {{ opt['reviews'] }}</span>{% endif %}
-                  {% if opt.get('average_price') %}<span class="chip">Average Price £{{ opt['average_price'] }}</span>{% endif %}
-                  {% if opt.get('offer') %}<span class="chip">Deal: Up to -{{ opt['offer'] }}%</span>{% endif %}
-                  {% if opt.get('url') %}<span class="chip"><a target="_blank" class="link" href="{{ opt['url'] }}">View</a></span>{% endif %}
+
+                  <!-- Row 2: Net Average • Deal -->
+                  <div style="display:flex; flex-wrap:wrap; gap:6px; width:100%;">
+                    {% if opt.get('net_average') is not none %}
+                      <span class="chip">
+                        Net Average: £{{ '%.2f'|format(opt['net_average']) }}{% if opt.get('offer') %} • Deal: {{ opt['offer'] }}{% if opt['offer'] and ('%' not in (opt['offer']|string)) %}%{% endif %}{% endif %}
+                      </span>
+                    {% endif %}
+                  </div>
+
+                  <!-- Row 3: Rating (low5/hi5) + Reviews -->
+                  <div style="display:flex; flex-wrap:wrap; gap:6px; width:100%;">
+                    {% if opt.get('posterior_mean') is not none %}
+                      <span class="chip">
+                        Rating {{ '%.2f'|format(opt['posterior_mean']) }}
+                        {% if opt.get('qlo5') is not none and opt.get('qhi5') is not none %}
+                          ({{ '%.2f'|format(opt['qlo5']) }}–{{ '%.2f'|format(opt['qhi5']) }})
+                        {% endif %}
+                        {% if opt.get('reviews') %} • {{ opt['reviews'] }} reviews{% endif %}
+                      </span>
+                    {% endif %}
+                  </div>
+
+                  
                 </div>
               </div>
             </label>
@@ -123,15 +190,93 @@ HTML_TEMPLATE = """
         </form>
       </div>
     </div>
+  <script>
+    (function() {
+      try {
+        var chips = document.querySelectorAll('.chip');
+        chips.forEach(function(el){
+          var t = (el.textContent || '').trim();
+          if (t.startsWith('Net Average')) {
+            el.classList.add('chip-value');
+          }
+          if (t.startsWith('Rating')) {
+            el.classList.add('chip-accent');
+          }
+        });
+        var openPopup = null;
+        var openButton = null;
+        function closePopup() {
+          if (openPopup) {
+            openPopup.classList.remove('open');
+            openPopup.setAttribute('aria-hidden', 'true');
+            openPopup = null;
+          }
+          if (openButton) {
+            openButton.setAttribute('aria-expanded', 'false');
+            openButton = null;
+          }
+        }
+        document.querySelectorAll('.votes').forEach(function(btn){
+          btn.setAttribute('aria-expanded', 'false');
+          btn.addEventListener('click', function(ev){
+            ev.preventDefault();
+            ev.stopPropagation();
+            var targetId = btn.getAttribute('data-target');
+            if (!targetId) {
+              return;
+            }
+            var popup = document.getElementById(targetId);
+            if (!popup) {
+              return;
+            }
+            if (openPopup === popup) {
+              closePopup();
+              return;
+            }
+            closePopup();
+            popup.classList.add('open');
+            popup.setAttribute('aria-hidden', 'false');
+            openPopup = popup;
+            openButton = btn;
+            btn.setAttribute('aria-expanded', 'true');
+          });
+        });
+        document.querySelectorAll('.voter-popup').forEach(function(pop){
+          pop.addEventListener('click', function(ev){
+            ev.stopPropagation();
+          });
+        });
+        document.querySelectorAll('.voter-popup-close').forEach(function(btn){
+          btn.addEventListener('click', function(ev){
+            ev.preventDefault();
+            ev.stopPropagation();
+            closePopup();
+          });
+        });
+        document.addEventListener('click', function(ev){
+          if (openPopup && !openPopup.contains(ev.target) && !ev.target.classList.contains('votes')) {
+            closePopup();
+          }
+        });
+        document.addEventListener('keydown', function(ev){
+          if (ev.key === 'Escape') {
+            closePopup();
+          }
+        });
+      } catch (e) { /* no-op */ }
+    })();
+  </script>
   </body>
   </html>
 """
+
 
 @poll_bp.route("/")
 def show_poll():
     # Ensure current week's selection exists and is up-to-date
     ensure_weekly_selection()
     options = get_current_week_selection()
+
     # derive identity and vote eligibility
     user = session.get("user")
     email = (user or {}).get("email") if user else None
@@ -140,6 +285,45 @@ def show_poll():
     already = voter_already_voted(voter_id, hash_ip(client_ip)) if voter_id or client_ip else False
     voting_open = is_voting_open()
     can_vote = voting_open and (user is not None) and not already
+
+    # Adjust each option URL to point to Saturday of the current week
+    try:
+        week_monday = week_monday_london(now_london())
+        saturday = (week_monday + timedelta(days=5)).date().isoformat()
+        new_options = []
+        for opt in options:
+            try:
+                o = dict(opt)
+            except Exception:
+                # if it's not a mapping, keep as-is
+                new_options.append(opt)
+                continue
+            url = o.get("url")
+            if url:
+                parts = urlsplit(url)
+                frag = parts.fragment or ""
+                pairs = parse_qsl(frag, keep_blank_values=True)
+                replaced = False
+                out_pairs = []
+                for k, v in pairs:
+                    if k == "date":
+                        v = saturday
+                        replaced = True
+                    out_pairs.append((k, v))
+                if not replaced:
+                    out_pairs.insert(0, ("date", saturday))
+                new_frag = urlencode(out_pairs)
+                o["url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, new_frag))
+            # Trim trailing ", London" from address for display
+            addr = o.get("address")
+            if isinstance(addr, str):
+                o["address"] = re.sub(r",\s*London\s*$", "", addr)
+            new_options.append(o)
+        options = new_options
+    except Exception:
+        # If any issue, fall back silently to original options
+        pass
+
     return render_template_string(
         HTML_TEMPLATE,
         options=options,
@@ -154,6 +338,7 @@ def show_poll():
 def vote():
     ensure_weekly_selection()
     option_ids = request.form.getlist("option_ids")
+
     # require login
     user = session.get("user")
     if not user:
@@ -162,6 +347,7 @@ def vote():
             session["pending_option_ids"] = option_ids
         session["post_login_redirect"] = "poll.resume_vote"
         return redirect(url_for("login.login", next="poll.resume_vote"))
+
     # identify voter via email
     voter_id = user.get("email") or uuid.uuid4().hex
     client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
@@ -199,6 +385,7 @@ def resume_vote():
     if not user:
         session["post_login_redirect"] = "poll.resume_vote"
         return redirect(url_for("login.login", next="poll.resume_vote"))
+
     # identify voter via email
     voter_id = user.get("email") or uuid.uuid4().hex
     client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
