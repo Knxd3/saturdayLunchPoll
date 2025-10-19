@@ -51,10 +51,11 @@ HTML_TEMPLATE = """
     .option { position:relative; display:flex; gap:12px; padding:14px 14px 10px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
     .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
     .option:active { transform: translateY(1px); }
-    .option input { margin-top: 4px; accent-color: var(--accent-strong); flex: 0 0 auto; }
+    .option input { margin-top: 7px; accent-color: var(--accent-strong); flex: 0 0 auto; }
     .option > div { flex: 1 1 auto; min-width: 0; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .chip-cuisine { padding: 1px 7px; line-height: 1.2; }
     .chip-accent { background: rgba(238,242,255,0.75); border-color: rgba(191,219,254,0.7); color: rgba(30,58,138,0.8); }
     .chip-value  { background: rgba(236,253,245,0.75); border-color: rgba(167,243,208,0.65); color: rgba(6,95,70,0.8); }
     .name { font-weight: 700; letter-spacing:.2px; }
@@ -78,6 +79,23 @@ HTML_TEMPLATE = """
     a.link { color: var(--accent); text-decoration: none; }
     a.link:hover { text-decoration: underline; }
     /* Title link should look like plain text; only indicate on hover */
+    @media (max-width: 640px) {
+      .poll { padding: 12px; border-radius: 14px; }
+      form { gap: 10px; }
+      .option { padding: 12px; gap: 10px; }
+      .option input { margin-top: 12px; }
+      .meta { gap:4px; }
+      .chip { font-size: 11px; padding: 1px 7px; }
+      .chip-cuisine { padding: 0 6px; }
+      .chip-accent { border-color: rgba(191,219,254,0.6); color: rgba(30,58,138,0.75); }
+      .chip-value { border-color: rgba(167,243,208,0.55); color: rgba(6,95,70,0.75); }
+      .name { font-size: 15px; line-height: 1.25; }
+      .info { font-size: 11px; gap: 8px; }
+      .votes { font-size: 11px; padding: 3px 8px; }
+      .voter-popup { right:10px; }
+      .voter-popup h4 { font-size:12px; }
+      .voter-popup-list li { font-size:11px; }
+    }
     .name a, .name a.link { color: inherit; text-decoration: none; }
     .name a:hover, .name a.link:hover { color: inherit; text-decoration: underline; }
   </style>
@@ -126,7 +144,7 @@ HTML_TEMPLATE = """
                     {% endif %}
                     {% if opt.get('is_excluded') %} <span class="chip">Excluded</span>{% endif %}
                   </div>
-                  {% if opt.get('cuisine') %}<span class="chip" style = "padding: 5 px;">{{ opt['cuisine'] }}</span>{% endif %}
+                  {% if opt.get('cuisine') %}<span class="chip chip-cuisine">{{ opt['cuisine'] }}</span>{% endif %}
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
                     <button type="button" class="votes" data-target="voters-{{ opt['id'] }}">{{ opt['votes'] }} votes</button>
                   </div>
