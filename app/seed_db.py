@@ -11,6 +11,12 @@ def seed_restaurants():
             df[col] = pd.to_numeric(df[col], errors="coerce")
             if not as_float:
                 df[col] = df[col].astype("Int64")
+    # Optionally filter
+    df = df.loc[(df.offer > 20) | ((df.rating > 9.0) & (df.reviews > 10)), :]
+    # df = df.loc[df.reviews > 0, :]
+    # t = df.groupby('offer').agg({'average_price': 'mean', 'name': 'count'})
+    # print(t)
+    print(f"Count: {df.shape}")
     # Add exclusion flag defaulting to 0 (not excluded)
     if "is_excluded" not in df.columns:
         df["is_excluded"] = 0

@@ -226,14 +226,11 @@ def get_current_week_selection() -> list[dict]:
         for opt in options:
             price = _parse_price(opt.get('average_price'))
             pct = _parse_percent(opt.get('offer'))
-            try:
-                rating = float(opt.get('rating'))
-            except Exception:
-                return None
-            try:
-                reviews = int(opt.get('reviews'))
-            except Exception:
-                return None
+            rating_val = opt.get('rating')
+            rating = _parse_price(rating_val) if rating_val not in (None, "") else None
+            reviews_val = opt.get('reviews')
+            reviews_num = _parse_price(reviews_val) if reviews_val not in (None, "") else None
+            reviews = int(reviews_num) if reviews_num is not None else None
             if price is not None and pct is not None:
                 net = max(0.0, price * (1.0 - pct))
                 opt['net_average'] = net

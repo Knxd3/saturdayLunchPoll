@@ -55,8 +55,8 @@ HTML_TEMPLATE = """
     .option > div { flex: 1 1 auto; min-width: 0; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
-    .chip-accent { background: var(--chip-accent-bg); border-color: var(--chip-accent-border); color: var(--chip-accent-text); }
-    .chip-value  { background:#ecfdf5; border-color:#a7f3d0; color:#065f46; }
+    .chip-accent { background: rgba(238,242,255,0.75); border-color: rgba(191,219,254,0.7); color: rgba(30,58,138,0.8); }
+    .chip-value  { background: rgba(236,253,245,0.75); border-color: rgba(167,243,208,0.65); color: rgba(6,95,70,0.8); }
     .name { font-weight: 700; letter-spacing:.2px; }
     .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:12px; }
     .toprow { display:flex; align-items:center; gap:10px; }
@@ -126,6 +126,7 @@ HTML_TEMPLATE = """
                     {% endif %}
                     {% if opt.get('is_excluded') %} <span class="chip">Excluded</span>{% endif %}
                   </div>
+                  {% if opt.get('cuisine') %}<span class="chip" style = "padding: 5 px;">{{ opt['cuisine'] }}</span>{% endif %}
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
                     <button type="button" class="votes" data-target="voters-{{ opt['id'] }}">{{ opt['votes'] }} votes</button>
                   </div>
@@ -157,7 +158,7 @@ HTML_TEMPLATE = """
 
                 <div class="meta">
                   <!-- Row 1: Cuisine -->
-                  {% if opt.get('cuisine') %}<span class="chip">{{ opt['cuisine'] }}</span>{% endif %}
+                  
 
                   <!-- Row 2: Net Average • Deal -->
                   <div style="display:flex; flex-wrap:wrap; gap:6px; width:100%;">

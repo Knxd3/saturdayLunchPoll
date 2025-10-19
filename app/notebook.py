@@ -708,3 +708,6 @@ pd.read_sql("SELECT * FROM weekly_selection", con)
 # pd.read_sql("SELECT * FROM weekly_results", con)
 # pd.read_sql("SELECT * FROM votes", con)
 # %%
+import numpy as np
+np.arange(0, 10+1)/10
+# %%

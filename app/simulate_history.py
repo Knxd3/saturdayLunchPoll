@@ -269,6 +269,6 @@ if __name__ == "__main__":
     # Example usage: clear and reseed 10 weeks
     print("Clearing votes and weekly_results...")
     clear_history()
-    # print("Seeding synthetic history...")
-    # simulate_history(SimConfig(weeks=250, options_per_week=7, min_voters=5, max_voters=10, seed=1, verbose=True))
+    print("Seeding synthetic history...")
+    simulate_history(SimConfig(weeks=250, options_per_week=7, min_voters=5, max_voters=10, seed=1, verbose=True))
     print("Done.")
