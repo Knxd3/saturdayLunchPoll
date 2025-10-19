@@ -83,6 +83,19 @@ def admin_home():
         button.toggle { padding:6px 10px; border-radius:8px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
         button.toggle[data-on=\"1\"] { background:#fee2e2; border-color:#fecaca; color:#991b1b; }
         button.toggle[data-on=\"0\"] { background:#dcfce7; border-color:#bbf7d0; color:#065f46; }
+        .chart-section { display:grid; grid-template-columns: 1fr 280px; gap:16px; align-items:start; margin-top:8px; }
+        .chart-container { height:420px; }
+        .chart-controls { display:flex; flex-direction:column; }
+        .chart-controls select { min-width:260px; padding:6px; border:1px solid #d1d5db; border-radius:8px; background:#fff; }
+        .band-toggle { font-size:13px; color:#374151; display:flex; align-items:center; gap:6px; margin-top:8px; }
+        @media (max-width: 768px) {
+          body { margin:16px; }
+          .chart-section { grid-template-columns: 1fr; }
+          .chart-container { order:1; height:320px; }
+          .chart-controls { order:2; width:100%; }
+          .chart-controls select { min-width:0; width:100%; height:auto; }
+          .band-toggle { align-items:flex-start; }
+        }
       </style>
       <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js\"></script>
       <script src=\"https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js\"></script>
@@ -102,15 +115,15 @@ def admin_home():
           <h3 style=\"margin:6px 0 6px;\">Posterior Evolution (weekly)</h3>
           <div style=\"color:#6b7280; font-size: 13px;\">Solid line: posterior mean. Shaded band: 5%–95% credible interval.</div>
         </div>
-        <div style=\"display:grid; grid-template-columns: 1fr 280px; gap:16px; align-items:start; margin-top:8px;\">
-          <div style=\"height:420px;\">
+        <div class=\"chart-section\">
+          <div class=\"chart-container\">
             <canvas id=\"mabChart\"></canvas>
           </div>
-          <div style=\"display:flex; flex-direction:column;\">
+          <div class=\"chart-controls\">
             <label for=\"restaurantSelect\" style=\"font-size:12px; color:#6b7280; margin-bottom:4px;\">Restaurants (total votes)</label>
-            <select id=\"restaurantSelect\" multiple size=\"10\" style=\"min-width:260px; height:100%; padding:6px; border:1px solid #d1d5db; border-radius:8px; background:#fff;\"></select>
+            <select id=\"restaurantSelect\" multiple size=\"10\" style=\"height:100%;\"></select>
             <div style=\"margin-top:6px; font-size:12px; color:#6b7280;\">Tip: select up to 12 restaurants.</div>
-            <label style=\"font-size:13px; color:#374151; display:flex; align-items:center; gap:6px; margin-top:8px;\">
+            <label class=\"band-toggle\">
               <input id=\"toggleBands\" type=\"checkbox\" checked />
               <span>Show credible bands</span>
             </label>

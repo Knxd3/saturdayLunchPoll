@@ -51,8 +51,8 @@ HTML_TEMPLATE = """
     .option { position:relative; display:flex; gap:12px; padding:14px 14px 10px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
     .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
     .option:active { transform: translateY(1px); }
-    .option input { margin-top: 7px; accent-color: var(--accent-strong); flex: 0 0 auto; }
-    .option > div { flex: 1 1 auto; min-width: 0; }
+    .option input { align-self:center; accent-color: var(--accent-strong); flex: 0 0 auto; }
+    .option > div { flex: 1 1 auto; min-width: 0; align-self:center; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
     .chip-cuisine { padding: 1px 7px; line-height: 1.2; }
@@ -83,7 +83,7 @@ HTML_TEMPLATE = """
       .poll { padding: 12px; border-radius: 14px; }
       form { gap: 10px; }
       .option { padding: 12px; gap: 10px; }
-      .option input { margin-top: 12px; }
+      .option input { align-self:center; }
       .meta { gap:4px; }
       .chip { font-size: 11px; padding: 1px 7px; }
       .chip-cuisine { padding: 0 6px; }
