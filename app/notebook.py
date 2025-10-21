@@ -462,6 +462,8 @@ cur.execute("DROP TABLE mab_stats")
 
 
 
+
+
 # %%
 # drop the tables and test synthetic data
 import sqlite3
@@ -472,11 +474,11 @@ import os
 os.getcwd()
 con = sqlite3.connect("c:\\Users\\alexa\\Documents\\Personal\\Projects\\saturdayLunchPoll\\database.db")
 
-con.execute("DROP TABLE mab_stats")
+# con.execute("DROP TABLE mab_stats")
 con.execute("DROP TABLE weekly_selection")
-con.execute("DROP TABLE voter_log")
-con.execute("DROP TABLE weekly_results")
-con.execute("DROP TABLE votes")
+# con.execute("DROP TABLE voter_log")
+# con.execute("DROP TABLE weekly_results")
+# con.execute("DROP TABLE votes")
 
 
 
@@ -710,4 +712,16 @@ pd.read_sql("SELECT * FROM weekly_selection", con)
 # %%
 import numpy as np
 np.arange(0, 10+1)/10
+# %%
+# %%
+import sqlite3
+import numpy as np
+import pandas as pd
+import os
+
+os.getcwd()
+con = sqlite3.connect("c:\\Users\\alexa\\Documents\\Personal\\Projects\\saturdayLunchPoll\\database.db")
+
+
+pd.read_sql("SELECT * FROM admins", con)
 # %%

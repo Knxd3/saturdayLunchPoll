@@ -2,6 +2,7 @@ import os
 import sqlite3
 import hashlib
 import random
+from collections import defaultdict
 from datetime import datetime
 from .MBA import update_mab_stats
 from scipy.stats import beta as sp_beta
@@ -93,7 +94,32 @@ def refresh_weekly_selection() -> None:
                     p = min(max(p, lo), hi)
             samples.append((row["name"], p))
         samples.sort(key=lambda x: x[1], reverse=True)
-        chosen_names = [name for name, _ in samples[:7]]
+
+        # Limit any single cuisine to at most two selections per week (fallback fills if needed)
+        cuisine_map = {
+            row["name"]: (row["cuisine"] or "").strip().lower()
+            for row in cur.execute("SELECT name, cuisine FROM restaurants")
+        }
+        max_per_cuisine = 2
+        cuisine_counts: dict[str, int] = defaultdict(int)
+        chosen_names: list[str] = []
+        for name, _ in samples:
+            cuisine = cuisine_map.get(name, "") or ""
+            cuisine_key = cuisine if cuisine else "unknown"
+            if max_per_cuisine > 0 and cuisine_counts[cuisine_key] >= max_per_cuisine:
+                continue
+            cuisine_counts[cuisine_key] += 1
+            chosen_names.append(name)
+            if len(chosen_names) == 7:
+                break
+        if len(chosen_names) < 7:
+            # Fill remaining slots ignoring cuisine cap to ensure we always have 7
+            for name, _ in samples:
+                if name in chosen_names:
+                    continue
+                chosen_names.append(name)
+                if len(chosen_names) == 7:
+                    break
         # print(samples[:7])
         if not chosen_names:
             return

@@ -3,6 +3,17 @@ from .db import get_db_connection
 import pandas as pd
 
 
+def _coerce_value(val):
+    if pd.isna(val):
+        return None
+    if hasattr(val, "item"):
+        try:
+            return val.item()
+        except Exception:
+            pass
+    return val
+
+
 def update_restaurants():
     df = pd.DataFrame(scrape_restaurants())
     # Ensure numeric dtypes where appropriate
@@ -13,11 +24,8 @@ def update_restaurants():
                 df[col] = df[col].astype("Int64")
     conn = get_db_connection()
     cur = conn.cursor()
-    # cur.execute("""
-    #             DROP TABLE restaurants
-    #             """)
-    # conn.commit()
-    cur.execute("""
+    cur.execute(
+        """
     CREATE TABLE IF NOT EXISTS restaurants (
         name TEXT UNIQUE,
         address TEXT,
@@ -28,10 +36,25 @@ def update_restaurants():
         offer INTEGER,
         url TEXT
     )
-    """)
+    """
+    )
     # Upsert (replace on name conflict)
     for _, row in df.iterrows():
-        cur.execute("""
+        values = tuple(
+            _coerce_value(row.get(col))
+            for col in (
+                "name",
+                "address",
+                "cuisine",
+                "average_price",
+                "rating",
+                "reviews",
+                "offer",
+                "url",
+            )
+        )
+        cur.execute(
+            """
         INSERT INTO restaurants (name, address, cuisine, average_price, rating, reviews, offer, url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
@@ -42,16 +65,9 @@ def update_restaurants():
             reviews=excluded.reviews,
             offer=excluded.offer,
             url=excluded.url
-        """, (
-            row.get("name"),
-            row.get("address"),
-            row.get("cuisine"),
-            row.get("average_price"),
-            row.get("rating"),
-            row.get("reviews"),
-            row.get("offer"),
-            row.get("url"),
-        ))
+        """,
+            values,
+        )
 
     conn.commit()
     conn.close()

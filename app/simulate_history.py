@@ -29,7 +29,7 @@ class SimConfig:
     max_voters: int = 8
     seed: int = 42
     # Fixed global pool size (same restaurants available every week)
-    pool_size: int = 150
+    pool_size: int = 50
     # Bias controls: portion of restaurants with higher "true p"
     heavy_ratio: float = 0.01  # fraction of pool that are high performers
     base_p_range: tuple[float, float] = (0.1, 0.5)
@@ -37,10 +37,10 @@ class SimConfig:
     week_noise: float = 0.06  # +/- noise added to per-week p
     # Voter preference matrix controls
     use_voter_matrix: bool = True
-    voter_pool_size: int = 10
-    voter_noise: float = 0.9  # per-voter deviation from restaurant base p
+    voter_pool_size: int = 20
+    voter_noise: float = 0.2  # per-voter deviation from restaurant base p
     # Raise probabilities to this power before sampling to sharpen choices
-    temperature: float = 10
+    temperature: float = 2
     # Debug printing controls
     verbose: bool = False
     debug_weeks: int = 5
@@ -270,5 +270,5 @@ if __name__ == "__main__":
     print("Clearing votes and weekly_results...")
     clear_history()
     print("Seeding synthetic history...")
-    simulate_history(SimConfig(weeks=250, options_per_week=7, min_voters=5, max_voters=10, seed=1, verbose=True))
+    simulate_history(SimConfig(weeks=250, options_per_week=3, min_voters=3, max_voters=10, seed=1, verbose=True))
     print("Done.")

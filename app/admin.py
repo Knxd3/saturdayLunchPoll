@@ -337,14 +337,21 @@ def admin_home():
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ name })
           });
-          const data = await resp.json();
-          if (data && data.ok) {
-            btn.dataset.on = String(data.is_excluded);
-            btn.textContent = data.is_excluded ? "Enable" : "Disable";
-            td.textContent = data.is_excluded ? "1" : "0";
+          const contentType = resp.headers.get("content-type") || "";
+          let data = null;
+          if (contentType.includes("application/json")) {
+            data = await resp.json();
           } else {
-            alert("Toggle failed");
+            const text = (await resp.text()).trim();
+            throw new Error(text || `Unexpected response (HTTP ${resp.status})`);
           }
+          if (!resp.ok || !data?.ok) {
+            const message = data?.error || `Toggle failed (HTTP ${resp.status})`;
+            throw new Error(message);
+          }
+          btn.dataset.on = String(data.is_excluded);
+          btn.textContent = data.is_excluded ? "Enable" : "Disable";
+          td.textContent = data.is_excluded ? "1" : "0";
         } catch (e) {
           alert("Error toggling: " + e);
         } finally {
@@ -363,7 +370,7 @@ def admin_home():
     </body>
     </html>
     """
-    return render_template_string(html, rows=rows)
+    return render_template_string(html, rows=rows, csrf_token=csrf_token)
 
 
 @admin_bp.route("/toggle", methods=["POST"])
@@ -371,7 +378,7 @@ def toggle_restaurant():
     user = session.get("user") or {}
     email = user.get("email")
     if not is_admin(email):
-        abort(403)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     payload = request.get_json(silent=True) or {}
     name = payload.get("name")
     if not name:

@@ -5,6 +5,10 @@ import pandas as pd
 
 def seed_restaurants():
     df = pd.DataFrame(scrape_restaurants())
+    # Drop entries missing a name or that duplicate an existing name
+    if "name" in df.columns:
+        df = df.dropna(subset=["name"])
+        df = df.drop_duplicates(subset=["name"])
     # Ensure numeric dtypes where appropriate
     for col, as_float in [("rating", True), ("reviews", False), ("average_price", False), ("offer", False)]:
         if col in df.columns:
@@ -12,7 +16,7 @@ def seed_restaurants():
             if not as_float:
                 df[col] = df[col].astype("Int64")
     # Optionally filter
-    df = df.loc[(df.offer > 20) | ((df.rating > 9.0) & (df.reviews > 10)), :]
+    # df = df.loc[(df.offer > 20) | ((df.rating > 9.0) & (df.reviews > 10)), :]
     # df = df.loc[df.reviews > 0, :]
     # t = df.groupby('offer').agg({'average_price': 'mean', 'name': 'count'})
     # print(t)
@@ -22,6 +26,8 @@ def seed_restaurants():
         df["is_excluded"] = 0
     conn = get_db_connection()
     df.to_sql("restaurants", conn, if_exists="replace", index=False)
+    # Ensure future upserts can rely on a unique name constraint
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_restaurants_name ON restaurants(name)")
     conn.close()
 
 if __name__ == "__main__":
