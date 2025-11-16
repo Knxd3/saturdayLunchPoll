@@ -6,10 +6,12 @@ import os
 import secrets
 from flask import Flask, request, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
+from datetime import timedelta
 
 
 def create_app():
     app = Flask(__name__)
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.environ.get("SESSION_DAYS", "30")))
 
     # Secret key for session/signing
     secret = os.environ.get("SECRET_KEY")

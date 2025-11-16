@@ -63,7 +63,7 @@ def scrape_restaurants():
                 "cuisine": cuisine_el.get_text(strip=True) if cuisine_el else None,
                 # store numerics
                 "average_price": _pluck_number(price_text),
-                "rating": _pluck_number(rating_text),
+                "rating": (rating_text),
                 "reviews": _pluck_number(reviews_text),
                 # store absolute discount percent if present
                 "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,

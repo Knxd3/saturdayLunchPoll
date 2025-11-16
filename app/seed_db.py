@@ -18,6 +18,7 @@ def seed_restaurants():
     # Optionally filter
     # df = df.loc[(df.offer > 20) | ((df.rating > 9.0) & (df.reviews > 10)), :]
     # df = df.loc[df.reviews > 0, :]
+    df = df.loc[df.offer > 30, :]
     # t = df.groupby('offer').agg({'average_price': 'mean', 'name': 'count'})
     # print(t)
     print(f"Count: {df.shape}")

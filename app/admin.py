@@ -53,12 +53,40 @@ def admin_home():
         try:
             rows = conn.execute(
                 (
-                    "SELECT name, cuisine, rating, reviews, COALESCE(is_excluded, 0) AS is_excluded "
+                    "SELECT name, address, cuisine, average_price, rating, reviews, offer, url, "
+                    "COALESCE(is_excluded, 0) AS is_excluded "
                     "FROM restaurants ORDER BY name COLLATE NOCASE"
                 )
             ).fetchall()
         except Exception:
             rows = []
+
+    # Build display helpers so admin table surfaces every dimension cleanly
+    processed_rows: list[dict] = []
+    for row in rows:
+        data = dict(row)
+        price = data.get("average_price")
+        if price not in (None, ""):
+            try:
+                price_val = float(price)
+                data["average_price_display"] = (
+                    f"£{int(price_val):,}" if price_val.is_integer() else f"£{price_val:,.2f}"
+                )
+            except Exception:
+                data["average_price_display"] = f"£{price}"
+        else:
+            data["average_price_display"] = ""
+        offer = data.get("offer")
+        if offer not in (None, ""):
+            try:
+                offer_val = abs(float(offer))
+                data["offer_display"] = f"{offer_val:.0f}% off"
+            except Exception:
+                data["offer_display"] = f"{offer}%"
+        else:
+            data["offer_display"] = ""
+        processed_rows.append(data)
+    rows = processed_rows
 
     # Ensure a CSRF token exists for admin actions
     import secrets as _secrets
@@ -76,7 +104,8 @@ def admin_home():
       <title>Admin · Restaurants</title>
       <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:20px; }
-        table { border-collapse: collapse; width: 100%; }
+        .table-wrap { overflow-x:auto; }
+        table { border-collapse: collapse; width: 100%; min-width: 1000px; }
         th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; }
         th { background: #f9fafb; font-weight: 600; }
         .chip { padding:2px 8px; border:1px solid #e5e7eb; border-radius:999px; font-size:12px; color:#6b7280; background:#f3f4f6; }
@@ -130,32 +159,48 @@ def admin_home():
           </div>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Cuisine</th>
-            <th>Rating</th>
-            <th>Reviews</th>
-            <th>Excluded?</th>
-            <th>Toggle</th>
-          </tr>
-        </thead>
-        <tbody>
-        {% for r in rows %}
-          <tr data-name=\"{{ r['name'] }}\">
-            <td>{{ r['name'] }}</td>
-            <td>{{ r['cuisine'] or '' }}</td>
-            <td>{{ r['rating'] or '' }}</td>
-            <td><span class=\"chip\">{{ r['reviews'] or 0 }}</span></td>
-            <td class=\"excluded\">{{ 1 if r['is_excluded'] else 0 }}</td>
-            <td>
-              <button class=\"toggle\" data-on=\"{{ 1 if r['is_excluded'] else 0 }}\">{{ 'Enable' if r['is_excluded'] else 'Disable' }}</button>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+      <div class=\"table-wrap\">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Cuisine</th>
+              <th>Address</th>
+              <th>Avg price</th>
+              <th>Discount</th>
+              <th>Rating</th>
+              <th>Reviews</th>
+              <th>URL</th>
+              <th>Excluded?</th>
+              <th>Toggle</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in rows %}
+            <tr data-name=\"{{ r['name'] }}\">
+              <td>{{ r['name'] }}</td>
+              <td>{{ r['cuisine'] or '' }}</td>
+              <td style=\"max-width:240px; white-space:normal;\">{{ r['address'] or '' }}</td>
+              <td>{{ r['average_price_display'] or '—' }}</td>
+              <td>{{ r['offer_display'] or '—' }}</td>
+              <td>{{ r['rating'] or '' }}</td>
+              <td><span class=\"chip\">{{ r['reviews'] or 0 }}</span></td>
+              <td>
+                {% if r['url'] %}
+                  <a href=\"{{ r['url'] }}\" target=\"_blank\" rel=\"noopener\">Open</a>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class=\"excluded\">{{ 1 if r['is_excluded'] else 0 }}</td>
+              <td>
+                <button class=\"toggle\" data-on=\"{{ 1 if r['is_excluded'] else 0 }}\">{{ 'Enable' if r['is_excluded'] else 'Disable' }}</button>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
       <script>
       (async function renderMabChart() {
         try {

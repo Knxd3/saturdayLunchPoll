@@ -287,8 +287,16 @@ def get_current_week_selection() -> list[dict]:
         ).fetchall()
         voters_by_option: dict[int, list[dict]] = {}
         for vr in vote_rows:
+            raw_name = vr["name"] or ""
+            if isinstance(raw_name, str):
+                parts = raw_name.strip().split()
+                display_name = parts[0] if parts else ""
+            else:
+                display_name = ""
+            if not display_name:
+                display_name = 'NA' # vr["email"]
             voters_by_option.setdefault(vr["option_id"], []).append(
-                {"email": vr["email"], "name": vr["name"] or vr["email"], "picture": vr["picture"]}
+                {"email": vr["email"], "name": display_name, "picture": vr["picture"]}
             )
         for opt in options:
             opt["voters"] = voters_by_option.get(opt["id"], [])
@@ -444,6 +452,9 @@ def record_vote(option_id: int, voter: dict | None = None) -> bool:
         cur = conn.cursor()
         email = (voter or {}).get("email") if voter else None
         name = (voter or {}).get("name") if voter else None
+        if isinstance(name, str):
+            parts = name.strip().split()
+            name = parts[0] if parts else None  # Only persist first name going forward
         picture = (voter or {}).get("picture") if voter else None
         if not email:
             return False

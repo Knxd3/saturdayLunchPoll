@@ -64,6 +64,9 @@ HTML_TEMPLATE = """
     .rank { width: 34px; height: 15px; border-radius: 6px; background: var(--chip); border:1px solid var(--chip-border); color: var(--muted); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:11px; }
     .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; cursor:pointer; }
     .votes:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* Cookie-only mode alt (kept for quick toggling):
+    .vote-count { margin-left:auto; background:#eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius:999px; font-size:12px; color:#1e3a8a; }
+    */
     .voter-popup { position:absolute; top:36px; right:14px; z-index:20; background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 10px; padding:10px 12px; width:220px; display:none; }
     .voter-popup.open { display:block; }
     .voter-popup h4 { margin:0 0 8px; font-size:13px; font-weight:600; color:var(--text); }
@@ -113,6 +116,9 @@ HTML_TEMPLATE = """
           <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
         {% endif %}
       </div>
+      <!-- Cookie-only header (kept for quick toggling):
+      <div style="display:flex; justify-content:flex-end; margin-bottom:1rem;"></div>
+      -->
 
       <!-- Title + subtitle -->
       <div style="text-align:center; margin-bottom:1rem;">
@@ -148,26 +154,29 @@ HTML_TEMPLATE = """
                   <div class="voter-avatars" style="display:flex; gap:4px; align-items:center; margin-left:auto;">
                     <button type="button" class="votes" data-target="voters-{{ opt['id'] }}">{{ opt['votes'] }} votes</button>
                   </div>
-                </div>
-                <div class="voter-popup" id="voters-{{ opt['id'] }}" role="dialog" aria-hidden="true">
-                  <button type="button" class="voter-popup-close" data-target="voters-{{ opt['id'] }}" aria-label="Close">×</button>
-                  <h4>Votes</h4>
-                  {% if opt.get('voters') %}
-                    <ul class="voter-popup-list">
-                      {% for v in opt.get('voters', []) %}
-                        <li>
-                          {% if v.get('picture') %}
-                            <img src="{{ v['picture'] }}" alt="{{ v.get('name') or v.get('email') }}">
-                          {% else %}
-                            <div class="avatar-fallback">{{ (v.get('name') or v.get('email') or '?')[0]|upper }}</div>
-                          {% endif %}
-                          <span>{{ v.get('name') or v.get('email') }}</span>
-                        </li>
-                      {% endfor %}
-                    </ul>
-                  {% else %}
-                    <div class="voter-popup-empty">No votes yet.</div>
-                  {% endif %}
+                  <div class="voter-popup" id="voters-{{ opt['id'] }}" role="dialog" aria-hidden="true">
+                    <button type="button" class="voter-popup-close" data-target="voters-{{ opt['id'] }}" aria-label="Close">×</button>
+                    <h4>Votes</h4>
+                    {% if opt.get('voters') %}
+                      <ul class="voter-popup-list">
+                        {% for v in opt.get('voters', []) %}
+                          <li>
+                            {% if v.get('picture') %}
+                              <img src="{{ v['picture'] }}" alt="{{ v.get('name') or 'NA' }}">
+                            {% else %}
+                              <div class="avatar-fallback">{{ (v.get('name') or '?')[0]|upper }}</div>
+                            {% endif %}
+                            <span>{{ v.get('name') or 'NA' }}</span>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    {% else %}
+                      <div class="voter-popup-empty">No votes yet.</div>
+                    {% endif %}
+                  </div>
+                  <!-- Simple total chip for cookie-only mode retained for later:
+                  <div class="vote-count">{{ opt['votes'] }} votes</div>
+                  -->
                 </div>
 
                 <div class="info">
@@ -282,6 +291,7 @@ HTML_TEMPLATE = """
             closePopup();
           }
         });
+        // For cookie-only mode without popups, comment out the block above and re-enable the vote-count chip.
       } catch (e) { /* no-op */ }
     })();
   </script>
@@ -300,10 +310,15 @@ def show_poll():
     user = session.get("user")
     email = (user or {}).get("email") if user else None
     voter_id = email or request.cookies.get("voter_id")
+    # Cookie-only mode snippet (kept for quick toggling):
+    # voter_cookie = request.cookies.get("voter_id")
+    # voter_id = voter_cookie or email
     client_ip = request.headers.get("Fly-Client-IP") or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr)
     already = voter_already_voted(voter_id, hash_ip(client_ip)) if voter_id or client_ip else False
     voting_open = is_voting_open()
     can_vote = voting_open and (user is not None) and not already
+    # Cookie-only mode would drop the user requirement:
+    # can_vote = voting_open and not already
 
     # Adjust each option URL to point to Saturday of the current week
     try:
@@ -366,6 +381,7 @@ def vote():
             session["pending_option_ids"] = option_ids
         session["post_login_redirect"] = "poll.resume_vote"
         return redirect(url_for("login.login", next="poll.resume_vote"))
+    # Cookie-only mode would skip the redirect above and trust cookies/IP only.
 
     # identify voter via email
     voter_id = user.get("email") or uuid.uuid4().hex
@@ -429,3 +445,6 @@ def resume_vote():
     from .poll_manager import log_voter
     log_voter(voter_id, ip_h, request.headers.get("User-Agent"), email=voter_id)
     return resp
+# Cookie-only mode shortcut kept for easy toggling:
+# def resume_vote():
+#     return redirect(url_for("poll.show_poll"))

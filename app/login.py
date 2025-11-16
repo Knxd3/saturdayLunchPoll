@@ -60,7 +60,7 @@ def login():
         session["post_login_redirect"] = nxt
     flow = build_flow(REDIRECT_URI)
     authorization_url, state = flow.authorization_url(
-        include_granted_scopes="true", prompt="consent"
+        include_granted_scopes="true" #, prompt="consent" - not necessary every time
     )
     session["state"] = state
     return redirect(authorization_url)
@@ -84,7 +84,9 @@ def callback():
     oauth2 = build("oauth2", "v2", credentials=credentials)
     user_info = oauth2.userinfo().get().execute()
 
+    session.permanent = True
     session["user"] = user_info
+    print(user_info)
     # If a post-login redirect was set, honor it
     post_nxt = session.pop("post_login_redirect", None)
     if post_nxt:
