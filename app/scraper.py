@@ -5,6 +5,13 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 import os
 import re
+import typing as _t
+
+# Added: optional HTTP fetching when a URL (or URLs) is provided
+try:
+    import requests  # type: ignore
+except Exception:  # pragma: no cover
+    requests = None  # Fallback if requests not installed; file-based scraping still works
 
 
 def _pluck_number(text: str | None):
@@ -22,27 +29,20 @@ def _pluck_number(text: str | None):
     except Exception:
         return None
 
-def scrape_restaurants():
-    # response = requests.get(url, timeout=10)
-    # response.raise_for_status()
-    # soup = BeautifulSoup(response.text, "html.parser")
+def scrape_restaurants(urls: _t.Optional[_t.Union[str, _t.Iterable[str]]] = None):
+    """Scrape restaurant listings.
 
-    # container = soup.find("div", {"data-testid": "result-list-restaurants"})
-    restaurants = []
-    base = Path(__file__).resolve().parent.parent / "soups"
-    count_pages = len(os.listdir(base))
-    for page in [i for i in range(1, count_pages + 1)]:
-        file_path = base / f"souppage{page}.txt"
-        with open(file_path, "r", encoding="utf-8") as f:
-            response = f.read()
+    When ``urls`` is provided (string or iterable of strings), fetch HTML from
+    the given URL(s) over HTTP. Otherwise fall back to reading local files from
+    the ``soups`` directory as before.
+    """
 
-        soup = BeautifulSoup(response, "html.parser")
+    def _extract_from_soup(soup: BeautifulSoup):
         container = soup.find("div", {"data-testid": "result-list-restaurants"})
-
         if not container:
             return []
 
-        # results = []
+        collected = []
         for anchor in container.find_all("a", href=True):
             name_el = anchor.find("h2")
             address_el = anchor.find("span", {"data-testid": "address"})
@@ -69,8 +69,48 @@ def scrape_restaurants():
                 "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
                 "url": anchor["href"],
             }
-            # results.append(data)
-            restaurants.append(data)
+            collected.append(data)
+        return collected
+
+    restaurants = []
+
+    # If URLs provided, use HTTP fetch path
+    if urls is not None:
+        # Normalize to list
+        if isinstance(urls, str):
+            url_list = [urls]
+        else:
+            url_list = list(urls)
+
+        if requests is None:
+            raise RuntimeError(
+                "requests is not available; install it or omit 'urls' to read from local files"
+            )
+
+        for url in url_list:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            restaurants.extend(_extract_from_soup(soup))
+
+        return restaurants
+
+    # Otherwise, fall back to existing file-based scraping (kept intact)
+    # response = requests.get(url, timeout=10)
+    # response.raise_for_status()
+    # soup = BeautifulSoup(response.text, "html.parser")
+
+    # container = soup.find("div", {"data-testid": "result-list-restaurants"})
+    base = Path(__file__).resolve().parent.parent / "soups"
+    count_pages = len(os.listdir(base))
+    for page in [i for i in range(1, count_pages + 1)]:
+        file_path = base / f"souppage{page}.txt"
+        with open(file_path, "r", encoding="utf-8") as f:
+            response = f.read()
+
+        soup = BeautifulSoup(response, "html.parser")
+        restaurants.extend(_extract_from_soup(soup))
+
     return restaurants
 
 
