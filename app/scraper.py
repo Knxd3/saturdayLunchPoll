@@ -5,13 +5,38 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 import os
 import re
-import typing as _t
+import time
+from typing import Iterable, Optional
 
-# Added: optional HTTP fetching when a URL (or URLs) is provided
-try:
-    import requests  # type: ignore
-except Exception:  # pragma: no cover
-    requests = None  # Fallback if requests not installed; file-based scraping still works
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+REQUEST_TIMEOUT_SECONDS = 15
+REQUEST_THROTTLE_SECONDS = 2  # pause between requests to avoid hammering site
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.8,en-US;q=0.5",
+    "Referer": "https://www.thefork.co.uk/",
+    "DNT": "1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+SESSION = requests.Session()
+RETRY = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=("GET",),
+    raise_on_status=False,
+)
+SESSION.mount("https://", HTTPAdapter(max_retries=RETRY))
+SESSION.headers.update(HEADERS)
 
 
 def _pluck_number(text: str | None):
@@ -29,73 +54,58 @@ def _pluck_number(text: str | None):
     except Exception:
         return None
 
-def scrape_restaurants(urls: _t.Optional[_t.Union[str, _t.Iterable[str]]] = None):
-    """Scrape restaurant listings.
+def _extract_restaurants(soup: BeautifulSoup):
+    container = soup.find("div", {"data-testid": "result-list-restaurants"})
 
-    When ``urls`` is provided (string or iterable of strings), fetch HTML from
-    the given URL(s) over HTTP. Otherwise fall back to reading local files from
-    the ``soups`` directory as before.
-    """
-
-    def _extract_from_soup(soup: BeautifulSoup):
-        container = soup.find("div", {"data-testid": "result-list-restaurants"})
-        if not container:
-            return []
-
-        collected = []
-        for anchor in container.find_all("a", href=True):
-            name_el = anchor.find("h2")
-            address_el = anchor.find("span", {"data-testid": "address"})
-            cuisine_el = anchor.find("span", {"data-testid": "cuisine"})
-            rating_el = anchor.find("span", {"data-testid": "rating"})
-            reviews_el = anchor.find("span", {"data-testid": "reviews"})
-            price_el = anchor.find(string=lambda t: t and "Average price" in t)
-            offer_el = anchor.find("div", {"data-testid": "offer-tag"})
-
-            rating_text = rating_el.get_text(strip=True) if rating_el else None
-            reviews_text = reviews_el.get_text(strip=True) if reviews_el else None
-            price_text = price_el.strip() if price_el else None
-            offer_text = offer_el.get_text(strip=True) if offer_el else None
-
-            data = {
-                "name": name_el.get_text(strip=True) if name_el else None,
-                "address": address_el.get_text(strip=True) if address_el else None,
-                "cuisine": cuisine_el.get_text(strip=True) if cuisine_el else None,
-                # store numerics
-                "average_price": _pluck_number(price_text),
-                "rating": (rating_text),
-                "reviews": _pluck_number(reviews_text),
-                # store absolute discount percent if present
-                "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
-                "url": anchor["href"],
-            }
-            collected.append(data)
-        return collected
+    if not container:
+        return []
 
     restaurants = []
+    for anchor in container.find_all("a", href=True):
+        name_el = anchor.find("h2")
+        address_el = anchor.find("span", {"data-testid": "address"})
+        cuisine_el = anchor.find("span", {"data-testid": "cuisine"})
+        rating_el = anchor.find("span", {"data-testid": "rating"})
+        reviews_el = anchor.find("span", {"data-testid": "reviews"})
+        price_el = anchor.find(string=lambda t: t and "Average price" in t)
+        offer_el = anchor.find("div", {"data-testid": "offer-tag"})
 
-    # If URLs provided, use HTTP fetch path
-    if urls is not None:
-        # Normalize to list
-        if isinstance(urls, str):
-            url_list = [urls]
-        else:
-            url_list = list(urls)
+        rating_text = rating_el.get_text(strip=True) if rating_el else None
+        reviews_text = reviews_el.get_text(strip=True) if reviews_el else None
+        price_text = price_el.strip() if price_el else None
+        offer_text = offer_el.get_text(strip=True) if offer_el else None
 
-        if requests is None:
-            raise RuntimeError(
-                "requests is not available; install it or omit 'urls' to read from local files"
-            )
+        data = {
+            "name": name_el.get_text(strip=True) if name_el else None,
+            "address": address_el.get_text(strip=True) if address_el else None,
+            "cuisine": cuisine_el.get_text(strip=True) if cuisine_el else None,
+            # store numerics
+            "average_price": _pluck_number(price_text),
+            "rating": (rating_text),
+            "reviews": _pluck_number(reviews_text),
+            # store absolute discount percent if present
+            "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
+            "url": anchor["href"],
+        }
+        # results.append(data)
+        restaurants.append(data)
+    return restaurants
 
-        for url in url_list:
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
-            restaurants.extend(_extract_from_soup(soup))
 
+def scrape_restaurants(urls: Optional[Iterable[str]] = None):
+    restaurants = []
+    if urls:
+        url_list = list(urls)
+        for idx, url in enumerate(url_list):
+            response = SESSION.get(url, timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=True)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            restaurants.extend(_extract_restaurants(soup))
+            # brief delay between requests so we behave like a normal user
+            if idx < len(url_list) - 1:
+                time.sleep(REQUEST_THROTTLE_SECONDS)
         return restaurants
 
-    # Otherwise, fall back to existing file-based scraping (kept intact)
     # response = requests.get(url, timeout=10)
     # response.raise_for_status()
     # soup = BeautifulSoup(response.text, "html.parser")
@@ -109,8 +119,7 @@ def scrape_restaurants(urls: _t.Optional[_t.Union[str, _t.Iterable[str]]] = None
             response = f.read()
 
         soup = BeautifulSoup(response, "html.parser")
-        restaurants.extend(_extract_from_soup(soup))
-
+        restaurants.extend(_extract_restaurants(soup))
     return restaurants
 
 

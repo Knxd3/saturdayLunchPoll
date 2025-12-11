@@ -216,7 +216,7 @@ def get_current_week_selection() -> list[dict]:
                 "LEFT JOIN (SELECT option_id, COUNT(*) AS cnt FROM votes WHERE week_created_at = ? GROUP BY option_id) v "
                 "ON v.option_id = ws.id "
                 "LEFT JOIN restaurants r ON r.name = ws.name "
-                "WHERE ws.created_at = ?"
+                "WHERE ws.created_at = ? AND ws.offer > 30"
             ),
             (ts, ts),
         ).fetchall()

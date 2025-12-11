@@ -1,10 +1,43 @@
+from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+import pandas as pd
+
 from .scraper import scrape_restaurants
 from .db import get_db_connection
-import pandas as pd
+from .timeutil import now_london, week_monday_london
 
 
 def seed_restaurants():
-    df = pd.DataFrame(scrape_restaurants())
+    week_monday = week_monday_london(now_london())
+    saturday = (week_monday + timedelta(days=5)).date().isoformat()
+    base_url = (
+        "https://www.thefork.co.uk/search?coordinates=51.50583%2C-0.139401&date=2025-12-13"
+        "&hour=780&p=1&partySize=8&promotionOnly=true&radius=5.994615908"
+    )
+    urls = []
+    for page in (1, 2, 3):
+        parts = urlsplit(base_url)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        replaced_date = False
+        replaced_page = False
+        out_pairs = []
+        for k, v in pairs:
+            if k == "date":
+                v = saturday
+                replaced_date = True
+            if k == "p":
+                v = str(page)
+                replaced_page = True
+            out_pairs.append((k, v))
+        if not replaced_date:
+            out_pairs.append(("date", saturday))
+        if not replaced_page:
+            out_pairs.append(("p", str(page)))
+        new_query = urlencode(out_pairs)
+        urls.append(urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)))
+
+    df = pd.DataFrame(scrape_restaurants(urls))
     # Drop entries missing a name or that duplicate an existing name
     if "name" in df.columns:
         df = df.dropna(subset=["name"])
@@ -18,7 +51,7 @@ def seed_restaurants():
     # Optionally filter
     # df = df.loc[(df.offer > 20) | ((df.rating > 9.0) & (df.reviews > 10)), :]
     # df = df.loc[df.reviews > 0, :]
-    df = df.loc[df.offer > 30, :]
+    # df = df.loc[df.offer > 30, :]
     # t = df.groupby('offer').agg({'average_price': 'mean', 'name': 'count'})
     # print(t)
     print(f"Count: {df.shape}")
