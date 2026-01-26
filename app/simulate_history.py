@@ -18,13 +18,14 @@ from typing import Iterable, List
 import sqlite3
 
 from .db import get_db_connection
+from .settings import WEEKLY_SELECTION_SIZE
 from .timeutil import week_monday_london, now_london, iso_seconds_local, to_london
 
 
 @dataclass
 class SimConfig:
     weeks: int = 20
-    options_per_week: int = 7
+    options_per_week: int = WEEKLY_SELECTION_SIZE
     min_voters: int = 5
     max_voters: int = 8
     seed: int = 42

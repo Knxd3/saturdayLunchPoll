@@ -92,7 +92,7 @@ def update_mab_stats(window_weeks: int = 200) -> list[dict]:
     df['weeks_ago'] = weeks_ago.astype(int)
 
     # 3) Decay weights and decayed successes/trials
-    H = 26  # half-life in weeks (tune 13–26)
+    H = 13  # half-life in weeks (tune 13–26) - do it in mab_history.py too!
     gamma = 0.5 ** (1.0 / H)
     w = np.power(gamma, df['weeks_ago'].to_numpy())
 

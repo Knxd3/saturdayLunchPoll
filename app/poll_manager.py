@@ -1,10 +1,12 @@
 import os
+import re
 import sqlite3
 import hashlib
 import random
 from collections import defaultdict
 from datetime import datetime
 from .MBA import update_mab_stats
+from .settings import WEEKLY_SELECTION_SIZE
 from scipy.stats import beta as sp_beta
 from .timeutil import (
     now_london,
@@ -26,6 +28,28 @@ def _now() -> datetime:
 def _next_monday_10am(after_dt: datetime) -> datetime:
     # Monday 10:00 (Europe/London) of the week AFTER `after_dt`
     return next_monday_10_london(after_dt)
+
+
+def _coerce_numeric(val) -> float | None:
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        pass
+    m = re.search(r"-?\d+(?:[\.,]\d+)?", s)
+    if not m:
+        return None
+    num = m.group(0).replace(",", ".")
+    try:
+        return float(num)
+    except Exception:
+        return None
 
 
 def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
@@ -61,15 +85,22 @@ def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
 def refresh_weekly_selection() -> None:
     ...  # Old random sampler preserved for reference
 """
-
-
-def refresh_weekly_selection() -> None:
+def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size: int | None = None) -> None:
     """Rotate weekly selection using Thompson Sampling over Beta priors.
 
-    Chooses 7 restaurants by sampling Beta(alpha, beta) where alpha/beta come
-    from a rolling window of weekly_results weighted by per-week turnout.
+    Chooses ``selection_size`` restaurants (10 by default) by sampling
+    Beta(alpha, beta) where alpha/beta come from a rolling window of
+    weekly_results weighted by per-week turnout.
     Preserves the output shape and archiving semantics of the previous version.
+    If ``min_offer`` is provided, only restaurants with ``offer`` strictly
+    greater than that value are eligible; pass ``None`` to disable the filter.
     """
+    try:
+        size = int(selection_size) if selection_size is not None else WEEKLY_SELECTION_SIZE
+    except Exception:
+        size = WEEKLY_SELECTION_SIZE
+    size = max(1, size)
+
     now_iso = iso_seconds_local(_now())
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
@@ -81,6 +112,31 @@ def refresh_weekly_selection() -> None:
             return
         # Thompson sampling with clipped Beta sample to reduce extreme randomness
         
+        restaurant_meta: dict[str, dict[str, object]] = {
+            row["name"]: {
+                "cuisine": (row["cuisine"] or "").strip().lower(),
+                "offer": row["offer"],
+            }
+            for row in cur.execute(
+                "SELECT name, cuisine, offer FROM restaurants WHERE COALESCE(is_excluded,0)=0"
+            )
+        }
+
+        def _passes_offer_filter(name: str) -> bool:
+            if min_offer is None:
+                return True
+            meta = restaurant_meta.get(name)
+            if not meta:
+                return False
+            offer_val = _coerce_numeric(meta.get("offer"))
+            if offer_val is None:
+                return False
+            try:
+                threshold = float(min_offer)
+            except Exception:
+                threshold = 30.0
+            return offer_val > threshold
+
         samples = []
         for row in stats:
             a = max(1e-6, float(row.get("alpha", 1.0)))
@@ -95,32 +151,43 @@ def refresh_weekly_selection() -> None:
             samples.append((row["name"], p))
         samples.sort(key=lambda x: x[1], reverse=True)
 
+        filtered_samples = samples if min_offer is None else [item for item in samples if _passes_offer_filter(item[0])]
+        if len(filtered_samples) < size:
+            reason = "eligible restaurants"
+            if min_offer is not None:
+                reason = f"restaurants match offer > {min_offer}"
+            print(
+                f"[refresh_weekly_selection] Only {len(filtered_samples)} {reason}; "
+                f"need at least {size}. Skipping refresh."
+            )
+            return
+
         # Limit any single cuisine to at most two selections per week (fallback fills if needed)
-        cuisine_map = {
-            row["name"]: (row["cuisine"] or "").strip().lower()
-            for row in cur.execute("SELECT name, cuisine FROM restaurants")
-        }
+        def _cuisine_key(name: str) -> str:
+            meta = restaurant_meta.get(name) or {}
+            cuisine = str(meta.get("cuisine") or "").strip().lower()
+            return cuisine if cuisine else "unknown"
+
         max_per_cuisine = 2
         cuisine_counts: dict[str, int] = defaultdict(int)
         chosen_names: list[str] = []
-        for name, _ in samples:
-            cuisine = cuisine_map.get(name, "") or ""
-            cuisine_key = cuisine if cuisine else "unknown"
+        for name, _ in filtered_samples:
+            cuisine_key = _cuisine_key(name)
             if max_per_cuisine > 0 and cuisine_counts[cuisine_key] >= max_per_cuisine:
                 continue
             cuisine_counts[cuisine_key] += 1
             chosen_names.append(name)
-            if len(chosen_names) == 7:
+            if len(chosen_names) == size:
                 break
-        if len(chosen_names) < 7:
-            # Fill remaining slots ignoring cuisine cap to ensure we always have 7
-            for name, _ in samples:
+        if len(chosen_names) < size:
+            # Fill remaining slots ignoring cuisine cap to ensure we always hit the target count
+            for name, _ in filtered_samples:
                 if name in chosen_names:
                     continue
                 chosen_names.append(name)
-                if len(chosen_names) == 7:
+                if len(chosen_names) == size:
                     break
-        # print(samples[:7])
+        # print(samples[:size])
         if not chosen_names:
             return
 
@@ -501,7 +568,7 @@ if __name__ == '__main__':
         ]
     samples.sort(key=lambda x: x[1], reverse=True)
 
-    print(f"\n Just Thompson samples: {samples[:7]}")
+    print(f"\n Just Thompson samples: {samples[:WEEKLY_SELECTION_SIZE]}")
     # print(update_mab_stats())
 
     print(get_current_week_selection())

@@ -31,7 +31,7 @@ def init_db():
     # NOTE: The restaurants table may be created via pandas to_sql in seed_db.
     # We don't enforce a schema here to avoid clashing with to_sql(replace).
 
-    # Store the 7 options for the current week. We keep one batch marked by created_at.
+    # Store the weekly poll options (10 by default). We keep one batch marked by created_at.
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS weekly_selection (
