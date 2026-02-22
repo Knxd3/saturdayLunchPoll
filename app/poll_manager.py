@@ -4,7 +4,8 @@ import sqlite3
 import hashlib
 import random
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from .MBA import update_mab_stats
 from .settings import WEEKLY_SELECTION_SIZE
 from scipy.stats import beta as sp_beta
@@ -18,6 +19,67 @@ from .timeutil import (
 
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 IP_SALT = os.environ.get("IP_SALT", "change-me-salt")
+AUTO_REFRESH_RESTAURANTS = os.environ.get("AUTO_REFRESH_RESTAURANTS", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+FALLBACK_SEARCH_URL = (
+    "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
+    "&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
+)
+
+
+def _log(msg: str) -> None:
+    print(f"[poll_manager] {msg}")
+
+
+def _env_int(name: str, default: int) -> int:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _next_saturday_date(now: datetime | None = None) -> str:
+    dt = to_london(now) if now else _now()
+    days_ahead = (5 - dt.weekday()) % 7
+    target = dt + timedelta(days=days_ahead)
+    return target.date().isoformat()
+
+
+def _normalize_search_url(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    target_date = _next_saturday_date()
+    replaced_date = False
+    replaced_page = False
+    out_pairs: list[tuple[str, str]] = []
+    for k, v in pairs:
+        if k == "date":
+            v = target_date
+            replaced_date = True
+        elif k == "p":
+            v = "1"
+            replaced_page = True
+        out_pairs.append((k, v))
+    if not replaced_date:
+        out_pairs.append(("date", target_date))
+    if not replaced_page:
+        out_pairs.append(("p", "1"))
+    new_query = urlencode(out_pairs, doseq=True)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
 
 def _now() -> datetime:
@@ -50,6 +112,153 @@ def _coerce_numeric(val) -> float | None:
         return float(num)
     except Exception:
         return None
+
+
+def _scrape_latest_catalog() -> list[dict] | None:
+    pages = max(1, _env_int("SCRAPER_PAGE_COUNT", _env_int("SCRAPER_PAGES", 10)))
+    base_url = os.environ.get("SCRAPER_BASE_URL")
+    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", True)
+    scrape_fn = None
+    supports_params = False
+    default_url = base_url
+
+    if use_selenium:
+        try:
+            from . import scraper_selenium as selenium_scraper
+
+            scrape_fn = selenium_scraper.scrape_restaurants
+            supports_params = True
+            if not default_url:
+                default_url = getattr(selenium_scraper, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            _log(f"Selenium scraper unavailable ({exc})")
+
+    if scrape_fn is None:
+        try:
+            from . import scraper as fallback_scraper
+
+            scrape_fn = fallback_scraper.scrape_restaurants
+            supports_params = False
+            if not default_url:
+                default_url = getattr(fallback_scraper, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            _log(f"Legacy scraper unavailable ({exc})")
+            return None
+
+    if supports_params:
+        target_url = _normalize_search_url(default_url or FALLBACK_SEARCH_URL)
+        _log(f"Scraping {pages} page(s) from {target_url}")
+        try:
+            results = scrape_fn(base_url=target_url, pages=pages)
+        except TypeError:
+            results = scrape_fn()
+    else:
+        target_url = "soups folder"
+        _log("Scraping offline soup snapshots")
+        results = scrape_fn()
+
+    count = len(results or [])
+    _log(f"Scraped {count} restaurants (raw)")
+    return results
+
+
+def _ensure_restaurant_schema(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS restaurants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            address TEXT,
+            cuisine TEXT,
+            average_price REAL,
+            rating REAL,
+            reviews REAL,
+            offer REAL,
+            url TEXT,
+            is_excluded INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    try:
+        cur.execute("ALTER TABLE restaurants ADD COLUMN is_excluded INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _refresh_restaurant_catalog_from_scrape() -> bool:
+    scraped = _scrape_latest_catalog()
+    if not scraped:
+        _log("No scraped rows; skipping restaurant refresh")
+        return False
+
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for row in scraped:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    _log(f"Deduped to {len(deduped)} restaurants")
+    if not deduped:
+        return False
+
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_restaurant_schema(cur)
+
+        exclusion_map: dict[str, int] = {}
+        try:
+            rows = cur.execute(
+                "SELECT COALESCE(url,'') AS url, name, COALESCE(is_excluded,0) AS ex FROM restaurants"
+            ).fetchall()
+            for row in rows:
+                key = (row["url"] or "").strip().lower() or (row["name"] or "").strip().lower()
+                if key:
+                    exclusion_map[key] = int(row["ex"] or 0)
+        except sqlite3.OperationalError:
+            exclusion_map = {}
+
+        try:
+            conn.execute("BEGIN")
+            cur.execute("DELETE FROM restaurants")
+            insert_sql = (
+                "INSERT INTO restaurants "
+                "(name, address, cuisine, average_price, rating, reviews, offer, url, is_excluded) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            for row in deduped:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    continue
+                key = (row.get("url") or "").strip().lower() or name.lower()
+                cur.execute(
+                    insert_sql,
+                    (
+                        name,
+                        row.get("address"),
+                        row.get("cuisine"),
+                        row.get("average_price"),
+                        row.get("rating"),
+                        row.get("reviews"),
+                        row.get("offer"),
+                        row.get("url"),
+                        exclusion_map.get(key, 0),
+                    ),
+                )
+            conn.commit()
+            _log(f"Rebuilt restaurants table with {len(deduped)} rows")
+        except Exception as exc:
+            conn.rollback()
+            _log(f"Failed to refresh restaurants table: {exc}")
+            return False
+
+    return True
 
 
 def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
@@ -95,6 +304,9 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
     If ``min_offer`` is provided, only restaurants with ``offer`` strictly
     greater than that value are eligible; pass ``None`` to disable the filter.
     """
+    if AUTO_REFRESH_RESTAURANTS:
+        _refresh_restaurant_catalog_from_scrape()
+
     try:
         size = int(selection_size) if selection_size is not None else WEEKLY_SELECTION_SIZE
     except Exception:
