@@ -335,19 +335,29 @@ def show_poll():
             url = o.get("url")
             if url:
                 parts = urlsplit(url)
+
+                def _replace_date_in_pairs(pairs: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], bool]:
+                    seen = False
+                    updated: list[tuple[str, str]] = []
+                    for k, v in pairs:
+                        if k == "date":
+                            v = saturday
+                            seen = True
+                        updated.append((k, v))
+                    if not seen:
+                        updated.insert(0, ("date", saturday))
+                    return updated, True
+
+                query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+                new_query_pairs, _ = _replace_date_in_pairs(query_pairs)
+                new_query = urlencode(new_query_pairs)
+
                 frag = parts.fragment or ""
-                pairs = parse_qsl(frag, keep_blank_values=True)
-                replaced = False
-                out_pairs = []
-                for k, v in pairs:
-                    if k == "date":
-                        v = saturday
-                        replaced = True
-                    out_pairs.append((k, v))
-                if not replaced:
-                    out_pairs.insert(0, ("date", saturday))
-                new_frag = urlencode(out_pairs)
-                o["url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, new_frag))
+                frag_pairs = parse_qsl(frag, keep_blank_values=True)
+                new_frag_pairs, _ = _replace_date_in_pairs(frag_pairs)
+                new_frag = urlencode(new_frag_pairs)
+
+                o["url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_frag))
             # Trim trailing ", London" from address for display
             addr = o.get("address")
             if isinstance(addr, str):
