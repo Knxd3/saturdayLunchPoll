@@ -26,7 +26,7 @@ def _now() -> datetime:
 
 
 def _next_monday_10am(after_dt: datetime) -> datetime:
-    # Monday 10:00 (Europe/London) of the week AFTER `after_dt`
+    # Sunday 09:00 (Europe/London) of the week AFTER `after_dt`
     return next_monday_10_london(after_dt)
 
 
@@ -477,7 +477,7 @@ def log_voter(voter_id: str, ip_hash: str, user_agent: str | None, email: str | 
 
 
 def is_voting_open(now: datetime | None = None) -> bool:
-    """Voting is open from Monday 10:00 to Tuesday 21:00 of the current selection week."""
+    """Voting is open from Sunday 09:00 to Tuesday 21:00 of the current selection week."""
     now = now or _now()
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row

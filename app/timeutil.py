@@ -41,19 +41,21 @@ def week_monday_london(dt: datetime) -> datetime:
 
 
 def next_monday_10_london(after_dt: datetime) -> datetime:
-    """Return Monday 10:00 (London) of the week AFTER the week containing `after_dt`."""
+    """Return Sunday 09:00 (London) of the week AFTER the week containing `after_dt`."""
     week_monday = week_monday_london(after_dt)
     next_week_monday = week_monday.date() + timedelta(days=7)
-    return datetime.combine(next_week_monday, time(10, 0), tzinfo=LONDON_TZ)
+    # Sunday of the next week (Mon + 6 days) at 09:00
+    return datetime.combine(next_week_monday + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
 
 
 def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
     """Voting window (open, close) for the week containing `dt`, London tz (aware).
 
-    Open: Monday 10:00;
+    Open: Sunday 09:00
     Close: Tuesday 21:00
     """
     week_monday = week_monday_london(dt)
-    open_start = datetime.combine(week_monday.date(), time(10, 0), tzinfo=LONDON_TZ)
+    # Sunday of this week (Mon + 6 days) at 09:00
+    open_start = datetime.combine(week_monday.date() + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
     close_end = datetime.combine(week_monday.date() + timedelta(days=1), time(21, 0), tzinfo=LONDON_TZ)
     return open_start, close_end
