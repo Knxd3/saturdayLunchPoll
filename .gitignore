@@ -1,6 +1,4 @@
 .satlunchpoll
-Dockerfile
-fly.toml
 soups
 database.db
 temp_snippet.txt
@@ -12,3 +10,4 @@ __pycache__
 misc
 notebook.py
 saturdayLunchPoll.code-workspace
+/driver

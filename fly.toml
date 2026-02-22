@@ -1,0 +1,29 @@
+# fly.toml app configuration file generated for saturday-lunch-poll on 2025-10-10T15:15:20+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'saturday-lunch-poll'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DB_PATH = '/data/database.db'
+  SESSION_COOKIE_SECURE = "1"
+
+[[mounts]]
+  source = 'data'
+  destination = '/data'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '1gb'
