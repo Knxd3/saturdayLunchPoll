@@ -344,7 +344,11 @@ def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
 def refresh_weekly_selection() -> None:
     ...  # Old random sampler preserved for reference
 """
-def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size: int | None = None) -> None:
+def refresh_weekly_selection(
+    min_offer: float | int | None = 30,
+    selection_size: int | None = None,
+    max_average_price: float | int | None = 30,
+) -> None:
     """Rotate weekly selection using Thompson Sampling over Beta priors.
 
     Chooses ``selection_size`` restaurants (10 by default) by sampling
@@ -353,6 +357,8 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
     Preserves the output shape and archiving semantics of the previous version.
     If ``min_offer`` is provided, only restaurants with ``offer`` strictly
     greater than that value are eligible; pass ``None`` to disable the filter.
+    If ``max_average_price`` is provided, only restaurants with ``average_price``
+    less than or equal to that value are eligible.
     """
     if AUTO_REFRESH_RESTAURANTS:
         _refresh_restaurant_catalog()
@@ -378,9 +384,10 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
             row["name"]: {
                 "cuisine": (row["cuisine"] or "").strip().lower(),
                 "offer": row["offer"],
+                "average_price": row["average_price"],
             }
             for row in cur.execute(
-                "SELECT name, cuisine, offer FROM restaurants WHERE COALESCE(is_excluded,0)=0"
+                "SELECT name, cuisine, offer, average_price FROM restaurants WHERE COALESCE(is_excluded,0)=0"
             )
         }
 
@@ -399,6 +406,21 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
                 threshold = 30.0
             return offer_val > threshold
 
+        def _passes_price_filter(name: str) -> bool:
+            if max_average_price is None:
+                return True
+            meta = restaurant_meta.get(name)
+            if not meta:
+                return False
+            price_val = _coerce_numeric(meta.get("average_price"))
+            if price_val is None:
+                return False
+            try:
+                threshold = float(max_average_price)
+            except Exception:
+                threshold = 30.0
+            return price_val <= threshold
+
         samples = []
         for row in stats:
             a = max(1e-6, float(row.get("alpha", 1.0)))
@@ -413,12 +435,18 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
             samples.append((row["name"], p))
         samples.sort(key=lambda x: x[1], reverse=True)
 
-        filtered_samples = samples if min_offer is None else [item for item in samples if _passes_offer_filter(item[0])]
+        def _eligible(name: str) -> bool:
+            return _passes_offer_filter(name) and _passes_price_filter(name)
+
+        filtered_samples = [item for item in samples if _eligible(item[0])]
         if len(filtered_samples) < size:
-            reason = "eligible restaurants"
+            parts = ["eligible restaurants"]
             if min_offer is not None:
-                reason = f"restaurants match offer > {min_offer}"
-            print(
+                parts.append(f"offer > {min_offer}")
+            if max_average_price is not None:
+                parts.append(f"avg_price <= {max_average_price}")
+            reason = " and ".join(parts)
+            _log(
                 f"[refresh_weekly_selection] Only {len(filtered_samples)} {reason}; "
                 f"need at least {size}. Skipping refresh."
             )

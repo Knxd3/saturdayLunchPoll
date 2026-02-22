@@ -114,7 +114,7 @@ def update_mab_stats(window_weeks: int = 200) -> list[dict]:
     from scipy.stats import beta 
     alpha0, beta0 = 1.0, 1.0  # or Jeffreys 0.5,0.5; or EB prior
     # E[v/r] =  E[v] * p(r); 
-    acf = 9
+    acf = 2
     agg['alpha'] = (alpha0 + agg['s']) * acf
     agg['beta']  = (beta0  + (agg['n'] - agg['s'])) * acf
 

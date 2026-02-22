@@ -101,7 +101,7 @@ def build_weekly_posteriors(
     # Inflate the evidence for narrower confidence bands?
     # change acf below to narrow CI and overweigh the evidence
     # E[v/r] =  E[v] * p(r); 
-    acf = 9
+    acf = 2
     df["votes"] = df["votes"].astype(float) * acf
     df["trials"] = df["trials"].astype(float) * acf
 
@@ -219,6 +219,7 @@ def build_chart_series(
         for r in by_week[week_iso]:
             key = r.name
             point[f"{key}_mean"] = r.mean
+            point[f"{key}_decayed"] = r.s
             if include_ci and (r.lower is not None) and (r.upper is not None):
                 point[f"{key}_lo"] = r.lower
                 point[f"{key}_band"] = max(0.0, r.upper - r.lower)

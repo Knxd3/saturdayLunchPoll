@@ -320,53 +320,59 @@ def show_poll():
     # Cookie-only mode would drop the user requirement:
     # can_vote = voting_open and not already
 
-    # Adjust each option URL to point to Saturday of the current week
+    # Normalize mapping, trim addresses, and align URLs to the current Saturday
+    normalized_options = []
     try:
-        week_monday = week_monday_london(now_london())
-        saturday = (week_monday + timedelta(days=5)).date().isoformat()
-        new_options = []
-        for opt in options:
-            try:
-                o = dict(opt)
-            except Exception:
-                # if it's not a mapping, keep as-is
-                new_options.append(opt)
-                continue
-            url = o.get("url")
-            if url:
-                parts = urlsplit(url)
-
-                def _replace_date_in_pairs(pairs: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], bool]:
-                    seen = False
-                    updated: list[tuple[str, str]] = []
-                    for k, v in pairs:
-                        if k == "date":
-                            v = saturday
-                            seen = True
-                        updated.append((k, v))
-                    if not seen:
-                        updated.insert(0, ("date", saturday))
-                    return updated, True
-
-                query_pairs = parse_qsl(parts.query, keep_blank_values=True)
-                new_query_pairs, _ = _replace_date_in_pairs(query_pairs)
-                new_query = urlencode(new_query_pairs)
-
-                frag = parts.fragment or ""
-                frag_pairs = parse_qsl(frag, keep_blank_values=True)
-                new_frag_pairs, _ = _replace_date_in_pairs(frag_pairs)
-                new_frag = urlencode(new_frag_pairs)
-
-                o["url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_frag))
-            # Trim trailing ", London" from address for display
-            addr = o.get("address")
-            if isinstance(addr, str):
-                o["address"] = re.sub(r",\s*London\s*$", "", addr)
-            new_options.append(o)
-        options = new_options
+        window = get_voting_window()
+        open_iso = window.get("open")
+        if open_iso:
+            open_dt = to_london(datetime.fromisoformat(open_iso))
+            saturday_date = (open_dt + timedelta(days=6)).date().isoformat()
+        else:
+            week_monday = week_monday_london(now_london())
+            saturday_date = (week_monday + timedelta(days=5)).date().isoformat()
     except Exception:
-        # If any issue, fall back silently to original options
-        pass
+        week_monday = week_monday_london(now_london())
+        saturday_date = (week_monday + timedelta(days=5)).date().isoformat()
+
+    def _apply_date(url: str) -> str:
+        try:
+            parts = urlsplit(url)
+            query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+            frag_pairs = parse_qsl(parts.fragment or "", keep_blank_values=True)
+
+            def _upsert_date(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+                seen = False
+                updated: list[tuple[str, str]] = []
+                for k, v in pairs:
+                    if k == "date":
+                        v = saturday_date
+                        seen = True
+                    updated.append((k, v))
+                if not seen:
+                    updated.insert(0, ("date", saturday_date))
+                return updated
+
+            new_query = urlencode(_upsert_date(query_pairs))
+            new_frag = urlencode(_upsert_date(frag_pairs))
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_frag))
+        except Exception:
+            return url
+
+    for opt in options:
+        try:
+            o = dict(opt)
+        except Exception:
+            normalized_options.append(opt)
+            continue
+        addr = o.get("address")
+        if isinstance(addr, str):
+            o["address"] = re.sub(r",\s*London\s*$", "", addr)
+        url = o.get("url")
+        if isinstance(url, str):
+            o["url"] = _apply_date(url)
+        normalized_options.append(o)
+    options = normalized_options
 
     return render_template_string(
         HTML_TEMPLATE,

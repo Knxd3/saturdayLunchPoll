@@ -294,6 +294,19 @@ def admin_home():
 
           const ctx = document.getElementById('mabChart').getContext('2d');
           let selectedNames = defaultNames;
+          const formatDecayedFooter = (items) => {
+            if (!items || !items.length) return '';
+            const item = items[0];
+            const dsLabel = item.dataset.label || '';
+            const nm = dsLabel.replace(/\s+(mean|95%|5%)$/, '');
+            const point = series[item.dataIndex] || {};
+            const decayed = point[`${nm}_decayed`];
+            if (typeof decayed === 'number' && !isNaN(decayed)) {
+              return `Decayed votes: ${decayed.toFixed(1)}`;
+            }
+            return '';
+          };
+
           const chart = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets: buildDatasets(selectedNames) },
@@ -303,7 +316,15 @@ def admin_home():
               stacked: false,
               plugins: {
                 legend: { display: false },
-                tooltip: { enabled: true }
+                tooltip: {
+                  enabled: true,
+                  callbacks: {
+                    footer: (items) => {
+                      const line = formatDecayedFooter(items);
+                      return line ? [line] : undefined;
+                    }
+                  }
+                }
               },
               scales: {
                 x: {
