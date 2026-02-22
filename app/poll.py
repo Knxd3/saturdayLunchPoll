@@ -124,7 +124,7 @@ HTML_TEMPLATE = """
       <div style="text-align:center; margin-bottom:1rem;">
         <h1 style="margin:1rem;">Where should we go for lunch?</h1>
         <div class="subtitle" style="font-size:0.95rem; color:#555;">
-          Vote for this week's pick. Options refresh every Monday at 10:00. Voting closes Wednesday 23:00.
+          Vote for this week's pick. Options refresh every Monday at 10:00. Voting closes Tuesday 21:00.
         </div>
         {% if already_voted %}
           <div style="padding:10px 12px; color:#fbbf24;">Looks like you already voted this week.</div>

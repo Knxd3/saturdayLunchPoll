@@ -61,7 +61,7 @@ def _fetch_weekly_votes_frame(conn: sqlite3.Connection, window_start_iso: str | 
 
 def build_weekly_posteriors(
     window_weeks: int = 200,
-    half_life_weeks: int = 13,
+    half_life_weeks: int = 6,
     alpha0: float = 1.0, # increase to narrow CI and underweigh the evidence; change acf below to narrow CI and overweigh the evidence
     beta0: float = 1.0, # increase to narrow CI and underweigh the evidence; change acf below to narrow CI and overweigh the evidence
 ) -> List[PosteriorRow]:

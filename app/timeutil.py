@@ -16,7 +16,7 @@ def now_london() -> datetime:
 def to_london(dt: datetime) -> datetime:
     """Ensure a datetime is in Europe/London timezone.
 
-    - If `dt` is naive, treat it as Europe/London local time.
+    - If `dt` is naive, treat it as Europe/London local time.git 
     - If `dt` is aware, convert to Europe/London.
     """
     if dt.tzinfo is None:
@@ -50,10 +50,10 @@ def next_monday_10_london(after_dt: datetime) -> datetime:
 def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
     """Voting window (open, close) for the week containing `dt`, London tz (aware).
 
-    Open: Monday 10:00
-    Close: Wednesday 23:00
+    Open: Monday 10:00;
+    Close: Tuesday 21:00
     """
     week_monday = week_monday_london(dt)
     open_start = datetime.combine(week_monday.date(), time(10, 0), tzinfo=LONDON_TZ)
-    close_end = datetime.combine(week_monday.date() + timedelta(days=2), time(23, 0), tzinfo=LONDON_TZ)
+    close_end = datetime.combine(week_monday.date() + timedelta(days=1), time(21, 0), tzinfo=LONDON_TZ)
     return open_start, close_end
