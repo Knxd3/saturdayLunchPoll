@@ -26,7 +26,7 @@ def _now() -> datetime:
 
 
 def _next_monday_10am(after_dt: datetime) -> datetime:
-    # Sunday 09:00 (Europe/London) of the week AFTER `after_dt`
+    # Next Sunday 09:00 (Europe/London) after `after_dt`
     return next_monday_10_london(after_dt)
 
 

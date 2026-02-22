@@ -41,11 +41,13 @@ def week_monday_london(dt: datetime) -> datetime:
 
 
 def next_monday_10_london(after_dt: datetime) -> datetime:
-    """Return Sunday 09:00 (London) of the week AFTER the week containing `after_dt`."""
-    week_monday = week_monday_london(after_dt)
-    next_week_monday = week_monday.date() + timedelta(days=7)
-    # Sunday of the next week (Mon + 6 days) at 09:00
-    return datetime.combine(next_week_monday + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
+    """Return the next Sunday 09:00 (London) strictly after `after_dt`."""
+    dt_l = to_london(after_dt)
+    monday_date = dt_l.date() - timedelta(days=dt_l.weekday())
+    next_sunday = datetime.combine(monday_date + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
+    if dt_l >= next_sunday:
+        next_sunday += timedelta(days=7)
+    return next_sunday
 
 
 def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
@@ -57,5 +59,6 @@ def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
     week_monday = week_monday_london(dt)
     # Sunday of this week (Mon + 6 days) at 09:00
     open_start = datetime.combine(week_monday.date() + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
-    close_end = datetime.combine(week_monday.date() + timedelta(days=1), time(21, 0), tzinfo=LONDON_TZ)
+    # Tuesday after Sunday is Monday + 8 days (i.e., next week Tuesday)
+    close_end = datetime.combine(week_monday.date() + timedelta(days=8), time(21, 0), tzinfo=LONDON_TZ)
     return open_start, close_end
