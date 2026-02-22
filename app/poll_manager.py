@@ -1,10 +1,12 @@
 import os
+import csv
 import re
 import sqlite3
 import hashlib
 import random
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from .MBA import update_mab_stats
 from .settings import WEEKLY_SELECTION_SIZE
@@ -25,6 +27,7 @@ AUTO_REFRESH_RESTAURANTS = os.environ.get("AUTO_REFRESH_RESTAURANTS", "1").strip
     "no",
     "off",
 }
+RESTAURANTS_CSV_PATH = os.environ.get("RESTAURANTS_CSV_PATH", "restaurants.csv")
 FALLBACK_SEARCH_URL = (
     "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
     "&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
@@ -80,6 +83,39 @@ def _normalize_search_url(base_url: str) -> str:
         out_pairs.append(("p", "1"))
     new_query = urlencode(out_pairs, doseq=True)
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
+def _load_restaurants_from_csv(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    if not path.exists():
+        _log(f"CSV path {path} does not exist")
+        return rows
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fp:
+            reader = csv.DictReader(fp)
+            for raw in reader:
+                if not raw:
+                    continue
+                lowered = { (k or "").strip().lower(): v for k, v in raw.items() }
+                name = (lowered.get("name") or "").strip()
+                if not name:
+                    continue
+                rows.append(
+                    {
+                        "name": name,
+                        "address": lowered.get("address"),
+                        "cuisine": lowered.get("cuisine"),
+                        "average_price": lowered.get("average_price"),
+                        "rating": lowered.get("rating"),
+                        "reviews": lowered.get("reviews"),
+                        "offer": lowered.get("offer"),
+                        "url": lowered.get("url"),
+                        "is_excluded": lowered.get("is_excluded"),
+                    }
+                )
+    except Exception as exc:
+        _log(f"Failed to read CSV {path}: {exc}")
+    return rows
 
 
 def _now() -> datetime:
@@ -185,15 +221,10 @@ def _ensure_restaurant_schema(cur: sqlite3.Cursor) -> None:
         pass
 
 
-def _refresh_restaurant_catalog_from_scrape() -> bool:
-    scraped = _scrape_latest_catalog()
-    if not scraped:
-        _log("No scraped rows; skipping restaurant refresh")
-        return False
-
+def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") -> bool:
     deduped: list[dict] = []
     seen: set[str] = set()
-    for row in scraped:
+    for row in rows:
         name = (row.get("name") or "").strip()
         if not name:
             continue
@@ -203,7 +234,7 @@ def _refresh_restaurant_catalog_from_scrape() -> bool:
         seen.add(key)
         deduped.append(row)
 
-    _log(f"Deduped to {len(deduped)} restaurants")
+    _log(f"Deduped to {len(deduped)} restaurants from {source or 'catalog'}")
     if not deduped:
         return False
 
@@ -261,6 +292,25 @@ def _refresh_restaurant_catalog_from_scrape() -> bool:
     return True
 
 
+def _refresh_restaurant_catalog() -> bool:
+    csv_path_raw = RESTAURANTS_CSV_PATH
+    if csv_path_raw:
+        path = Path(csv_path_raw)
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        rows = _load_restaurants_from_csv(path)
+        if rows:
+            return _refresh_restaurant_catalog_from_rows(rows, f"CSV {path}")
+        else:
+            _log(f"CSV {path} produced no rows; falling back to live scrape")
+
+    scraped = _scrape_latest_catalog()
+    if not scraped:
+        _log("No catalog rows from scrape; skipping restaurant refresh")
+        return False
+    return _refresh_restaurant_catalog_from_rows(scraped, "live scrape")
+
+
 def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
     row = conn.execute("SELECT MAX(created_at) AS ts FROM weekly_selection").fetchone()
     if row and row["ts"]:
@@ -305,7 +355,7 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
     greater than that value are eligible; pass ``None`` to disable the filter.
     """
     if AUTO_REFRESH_RESTAURANTS:
-        _refresh_restaurant_catalog_from_scrape()
+        _refresh_restaurant_catalog()
 
     try:
         size = int(selection_size) if selection_size is not None else WEEKLY_SELECTION_SIZE
