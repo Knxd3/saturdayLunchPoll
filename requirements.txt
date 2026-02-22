@@ -10,3 +10,4 @@ google-auth-oauthlib
 google-api-python-client
 numpy>=1.23
 scipy>=1.10,<2.0
+selenium>=4.21.0
