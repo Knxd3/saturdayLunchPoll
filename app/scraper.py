@@ -2,11 +2,9 @@
 Web scraper for restaurant listings.
 """
 from bs4 import BeautifulSoup
-from pathlib import Path
-import os
 import re
 import time
-from typing import Iterable, Optional
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,6 +36,10 @@ RETRY = Retry(
 SESSION.mount("https://", HTTPAdapter(max_retries=RETRY))
 SESSION.headers.update(HEADERS)
 
+DEFAULT_SEARCH_URL = (
+    "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1&partySize=8&promotionOnly=true&timezone=Europe%2FLondon"
+)
+
 
 def _pluck_number(text: str | None):
     if not text:
@@ -53,6 +55,15 @@ def _pluck_number(text: str | None):
         return int(raw)
     except Exception:
         return None
+
+
+def _build_page_url(base_url: str, page: int) -> str:
+    parsed = urlsplit(base_url)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    query_dict = dict(query_pairs)
+    query_dict["p"] = str(page)
+    new_query = urlencode(query_dict, doseq=True)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
 def _extract_restaurants(soup: BeautifulSoup):
     container = soup.find("div", {"data-testid": "result-list-restaurants"})
@@ -92,34 +103,21 @@ def _extract_restaurants(soup: BeautifulSoup):
     return restaurants
 
 
-def scrape_restaurants(urls: Optional[Iterable[str]] = None):
+def scrape_restaurants(base_url: str | None = None, pages: int = 3):
+    """Scrape TheFork listings by iterating the `p` page parameter."""
+
+    url = base_url or DEFAULT_SEARCH_URL
     restaurants = []
-    if urls:
-        url_list = list(urls)
-        for idx, url in enumerate(url_list):
-            response = SESSION.get(url, timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=True)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
-            restaurants.extend(_extract_restaurants(soup))
-            # brief delay between requests so we behave like a normal user
-            if idx < len(url_list) - 1:
-                time.sleep(REQUEST_THROTTLE_SECONDS)
-        return restaurants
-
-    # response = requests.get(url, timeout=10)
-    # response.raise_for_status()
-    # soup = BeautifulSoup(response.text, "html.parser")
-
-    # container = soup.find("div", {"data-testid": "result-list-restaurants"})
-    base = Path(__file__).resolve().parent.parent / "soups"
-    count_pages = len(os.listdir(base))
-    for page in [i for i in range(1, count_pages + 1)]:
-        file_path = base / f"souppage{page}.txt"
-        with open(file_path, "r", encoding="utf-8") as f:
-            response = f.read()
-
-        soup = BeautifulSoup(response, "html.parser")
+    total_pages = max(1, pages)
+    for page in range(1, total_pages + 1):
+        page_url = _build_page_url(url, page)
+        response = SESSION.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=True)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
         restaurants.extend(_extract_restaurants(soup))
+        # brief delay between requests so we behave like a normal user
+        if page < total_pages:
+            time.sleep(REQUEST_THROTTLE_SECONDS)
     return restaurants
 
 

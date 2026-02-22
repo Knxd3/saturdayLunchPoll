@@ -17,6 +17,174 @@ from .timeutil import (
 DB_PATH = os.environ.get("DB_PATH", "database.db")
 IP_SALT = os.environ.get("IP_SALT", "change-me-salt")
 
+# Attempt to refresh the restaurants catalog automatically before sampling
+AUTO_REFRESH_RESTAURANTS = os.environ.get("AUTO_REFRESH_RESTAURANTS", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
+FALLBACK_SEARCH_URL = (
+    "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
+    "&partySize=8&promotionOnly=true&timezone=Europe%2FLondon"
+)
+
+
+def _env_int(name: str, default: int) -> int:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _scrape_latest_catalog() -> list[dict] | None:
+    """Fetch the latest restaurants via the configured scraper."""
+
+    pages = max(1, _env_int("SCRAPER_PAGE_COUNT", _env_int("SCRAPER_PAGES", 3)))
+    base_url = os.environ.get("SCRAPER_BASE_URL")
+    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", True)
+    scrape_fn = None
+    default_url = base_url
+
+    if use_selenium:
+        try:
+            from . import scraper_selenium as scraper_mod
+
+            scrape_fn = scraper_mod.scrape_restaurants
+            if not default_url:
+                default_url = getattr(scraper_mod, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            print(f"[poll_manager] Selenium scrape unavailable: {exc}")
+            scrape_fn = None
+
+    if scrape_fn is None:
+        try:
+            from . import scraper as scraper_mod
+
+            scrape_fn = scraper_mod.scrape_restaurants
+            if not default_url:
+                default_url = getattr(scraper_mod, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            print(f"[poll_manager] Requests scraper unavailable: {exc}")
+            return None
+
+    target_url = default_url or FALLBACK_SEARCH_URL
+    try:
+        return scrape_fn(base_url=target_url, pages=pages)
+    except Exception as exc:
+        print(f"[poll_manager] scrape failed: {exc}")
+        return None
+
+
+def _ensure_restaurant_schema(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS restaurants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            address TEXT,
+            cuisine TEXT,
+            average_price REAL,
+            rating REAL,
+            reviews REAL,
+            offer REAL,
+            url TEXT,
+            is_excluded INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    try:
+        cur.execute("ALTER TABLE restaurants ADD COLUMN is_excluded INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        # Column already exists (or table freshly created)
+        pass
+
+
+def _refresh_restaurant_catalog_from_scrape() -> bool:
+    """Scrape the latest listings and replace the restaurants table."""
+
+    scraped = _scrape_latest_catalog()
+    if not scraped:
+        return False
+
+    deduped: list[dict] = []
+    seen_names: set[str] = set()
+    for row in scraped:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        deduped.append(row)
+
+    if not deduped:
+        return False
+
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_restaurant_schema(cur)
+        exclusion_map: dict[str, int] = {}
+        try:
+            rows = cur.execute(
+                "SELECT name, url, COALESCE(is_excluded, 0) AS is_excluded FROM restaurants"
+            ).fetchall()
+            for row in rows:
+                key = (row["url"] or "").strip().lower() or (row["name"] or "").strip().lower()
+                if key:
+                    exclusion_map[key] = int(row["is_excluded"] or 0)
+        except sqlite3.OperationalError:
+            exclusion_map = {}
+
+        try:
+            conn.execute("BEGIN")
+            cur.execute("DELETE FROM restaurants")
+            insert_sql = (
+                "INSERT INTO restaurants "
+                "(name, address, cuisine, average_price, rating, reviews, offer, url, is_excluded) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            for row in deduped:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    continue
+                key = (row.get("url") or "").strip().lower() or name.lower()
+                is_excluded = exclusion_map.get(key, 0)
+                cur.execute(
+                    insert_sql,
+                    (
+                        name,
+                        row.get("address"),
+                        row.get("cuisine"),
+                        row.get("average_price"),
+                        row.get("rating"),
+                        row.get("reviews"),
+                        row.get("offer"),
+                        row.get("url"),
+                        is_excluded,
+                    ),
+                )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            print(f"[poll_manager] failed to refresh restaurants table: {exc}")
+            return False
+
+    return True
+
 
 def _now() -> datetime:
     # Standardized London-local current time (aware)
@@ -70,6 +238,9 @@ def refresh_weekly_selection() -> None:
     from a rolling window of weekly_results weighted by per-week turnout.
     Preserves the output shape and archiving semantics of the previous version.
     """
+    if AUTO_REFRESH_RESTAURANTS:
+        _refresh_restaurant_catalog_from_scrape()
+
     now_iso = iso_seconds_local(_now())
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.row_factory = sqlite3.Row
