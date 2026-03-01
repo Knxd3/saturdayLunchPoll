@@ -81,7 +81,10 @@ def _normalize_search_url(base_url: str) -> str:
 def _scrape_latest_catalog() -> list[dict] | None:
     pages = max(1, _env_int("SCRAPER_PAGE_COUNT", _env_int("SCRAPER_PAGES", 10)))
     base_url = os.environ.get("SCRAPER_BASE_URL")
-    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", True)
+    # Default to the offline BeautifulSoup parser; Selenium requires a full
+    # Chrome/driver stack which is unavailable on Fly's shared machines and
+    # can hang worker startups while it tries to download binaries.
+    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", False)
     scrape_fn = None
     default_url = base_url
 
