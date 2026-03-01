@@ -56,16 +56,9 @@ def voting_window_london(dt: datetime) -> tuple[datetime, datetime]:
     Open: Sunday 09:00
     Close: Tuesday 21:00
     """
-    dt_l = to_london(dt)
-    week_monday = week_monday_london(dt_l)
-    upcoming_sunday = week_monday + timedelta(days=6)
-    # Default to the upcoming Sunday window (prep ahead of kickoff)
-    open_start = datetime.combine(upcoming_sunday.date(), time(9, 0), tzinfo=LONDON_TZ)
-    close_end = datetime.combine((upcoming_sunday + timedelta(days=2)).date(), time(21, 0), tzinfo=LONDON_TZ)
-    prev_open = open_start - timedelta(days=7)
-    prev_close = close_end - timedelta(days=7)
-    # If the selection timestamp sits inside the active window (Sun 09:00 -> Tue 21:00),
-    # anchor to the Sunday that already kicked off this week's voting phase.
-    if prev_open <= dt_l <= prev_close:
-        open_start, close_end = prev_open, prev_close
+    week_monday = week_monday_london(dt)
+    # Sunday of this week (Mon + 6 days) at 09:00
+    open_start = datetime.combine(week_monday.date() + timedelta(days=6), time(9, 0), tzinfo=LONDON_TZ)
+    # Tuesday after Sunday is Monday + 8 days (i.e., next week Tuesday)
+    close_end = datetime.combine(week_monday.date() + timedelta(days=8), time(21, 0), tzinfo=LONDON_TZ)
     return open_start, close_end

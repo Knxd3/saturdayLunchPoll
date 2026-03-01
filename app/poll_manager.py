@@ -1,10 +1,12 @@
 import os
+import csv
 import re
 import sqlite3
 import hashlib
 import random
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from .MBA import update_mab_stats
 from .settings import WEEKLY_SELECTION_SIZE
@@ -25,10 +27,15 @@ AUTO_REFRESH_RESTAURANTS = os.environ.get("AUTO_REFRESH_RESTAURANTS", "1").strip
     "no",
     "off",
 }
+RESTAURANTS_CSV_PATH = os.environ.get("RESTAURANTS_CSV_PATH", "restaurants.csv")
 FALLBACK_SEARCH_URL = (
     "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
     "&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
 )
+
+
+def _log(msg: str) -> None:
+    print(f"[poll_manager] {msg}")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -78,138 +85,37 @@ def _normalize_search_url(base_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
 
-def _scrape_latest_catalog() -> list[dict] | None:
-    pages = max(1, _env_int("SCRAPER_PAGE_COUNT", _env_int("SCRAPER_PAGES", 10)))
-    base_url = os.environ.get("SCRAPER_BASE_URL")
-    # Default to the offline BeautifulSoup parser; Selenium requires a full
-    # Chrome/driver stack which is unavailable on Fly's shared machines and
-    # can hang worker startups while it tries to download binaries.
-    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", False)
-    scrape_fn = None
-    default_url = base_url
-
-    if use_selenium:
-        try:
-            from . import scraper_selenium as scraper_mod
-
-            scrape_fn = scraper_mod.scrape_restaurants
-            if not default_url:
-                default_url = getattr(scraper_mod, "DEFAULT_SEARCH_URL", None)
-        except Exception as exc:
-            print(f"[poll_manager] Selenium scraper unavailable: {exc}")
-
-    if scrape_fn is None:
-        try:
-            from . import scraper as scraper_mod
-
-            scrape_fn = scraper_mod.scrape_restaurants
-            if not default_url:
-                default_url = getattr(scraper_mod, "DEFAULT_SEARCH_URL", None)
-        except Exception as exc:
-            print(f"[poll_manager] Requests scraper unavailable: {exc}")
-            return None
-
-    target_url = _normalize_search_url(default_url or FALLBACK_SEARCH_URL)
+def _load_restaurants_from_csv(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    if not path.exists():
+        _log(f"CSV path {path} does not exist")
+        return rows
     try:
-        return scrape_fn(base_url=target_url, pages=pages)
-    except Exception as exc:
-        print(f"[poll_manager] scrape failed: {exc}")
-        return None
-
-
-def _ensure_restaurant_schema(cur: sqlite3.Cursor) -> None:
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS restaurants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            address TEXT,
-            cuisine TEXT,
-            average_price REAL,
-            rating REAL,
-            reviews REAL,
-            offer REAL,
-            url TEXT,
-            is_excluded INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    try:
-        cur.execute("ALTER TABLE restaurants ADD COLUMN is_excluded INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-
-def _refresh_restaurant_catalog_from_scrape() -> bool:
-    scraped = _scrape_latest_catalog()
-    if not scraped:
-        return False
-
-    deduped: list[dict] = []
-    seen: set[str] = set()
-    for row in scraped:
-        name = (row.get("name") or "").strip()
-        if not name:
-            continue
-        key = name.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(row)
-
-    if not deduped:
-        return False
-
-    with sqlite3.connect(DB_PATH, timeout=30) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        _ensure_restaurant_schema(cur)
-
-        exclusion_map: dict[str, int] = {}
-        try:
-            rows = cur.execute(
-                "SELECT COALESCE(url, '') AS url, name, COALESCE(is_excluded, 0) AS ex FROM restaurants"
-            ).fetchall()
-            for row in rows:
-                key = (row["url"] or "").strip().lower() or (row["name"] or "").strip().lower()
-                if key:
-                    exclusion_map[key] = int(row["ex"] or 0)
-        except sqlite3.OperationalError:
-            exclusion_map = {}
-
-        try:
-            conn.execute("BEGIN")
-            cur.execute("DELETE FROM restaurants")
-            insert_sql = (
-                "INSERT INTO restaurants (name, address, cuisine, average_price, rating, reviews, offer, url, is_excluded)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            for row in deduped:
-                name = (row.get("name") or "").strip()
+        with path.open("r", encoding="utf-8", newline="") as fp:
+            reader = csv.DictReader(fp)
+            for raw in reader:
+                if not raw:
+                    continue
+                lowered = { (k or "").strip().lower(): v for k, v in raw.items() }
+                name = (lowered.get("name") or "").strip()
                 if not name:
                     continue
-                key = (row.get("url") or "").strip().lower() or name.lower()
-                cur.execute(
-                    insert_sql,
-                    (
-                        name,
-                        row.get("address"),
-                        row.get("cuisine"),
-                        row.get("average_price"),
-                        row.get("rating"),
-                        row.get("reviews"),
-                        row.get("offer"),
-                        row.get("url"),
-                        exclusion_map.get(key, 0),
-                    ),
+                rows.append(
+                    {
+                        "name": name,
+                        "address": lowered.get("address"),
+                        "cuisine": lowered.get("cuisine"),
+                        "average_price": lowered.get("average_price"),
+                        "rating": lowered.get("rating"),
+                        "reviews": lowered.get("reviews"),
+                        "offer": lowered.get("offer"),
+                        "url": lowered.get("url"),
+                        "is_excluded": lowered.get("is_excluded"),
+                    }
                 )
-            conn.commit()
-        except Exception as exc:
-            conn.rollback()
-            print(f"[poll_manager] failed to refresh restaurants table: {exc}")
-            return False
-
-    return True
+    except Exception as exc:
+        _log(f"Failed to read CSV {path}: {exc}")
+    return rows
 
 
 def _now() -> datetime:
@@ -242,6 +148,167 @@ def _coerce_numeric(val) -> float | None:
         return float(num)
     except Exception:
         return None
+
+
+def _scrape_latest_catalog() -> list[dict] | None:
+    pages = max(1, _env_int("SCRAPER_PAGE_COUNT", _env_int("SCRAPER_PAGES", 10)))
+    base_url = os.environ.get("SCRAPER_BASE_URL")
+    use_selenium = _env_flag("SCRAPER_USE_SELENIUM", True)
+    scrape_fn = None
+    supports_params = False
+    default_url = base_url
+
+    if use_selenium:
+        try:
+            from . import scraper_selenium as selenium_scraper
+
+            scrape_fn = selenium_scraper.scrape_restaurants
+            supports_params = True
+            if not default_url:
+                default_url = getattr(selenium_scraper, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            _log(f"Selenium scraper unavailable ({exc})")
+
+    if scrape_fn is None:
+        try:
+            from . import scraper as fallback_scraper
+
+            scrape_fn = fallback_scraper.scrape_restaurants
+            supports_params = False
+            if not default_url:
+                default_url = getattr(fallback_scraper, "DEFAULT_SEARCH_URL", None)
+        except Exception as exc:
+            _log(f"Legacy scraper unavailable ({exc})")
+            return None
+
+    if supports_params:
+        target_url = _normalize_search_url(default_url or FALLBACK_SEARCH_URL)
+        _log(f"Scraping {pages} page(s) from {target_url}")
+        try:
+            results = scrape_fn(base_url=target_url, pages=pages)
+        except TypeError:
+            results = scrape_fn()
+    else:
+        target_url = "soups folder"
+        _log("Scraping offline soup snapshots")
+        results = scrape_fn()
+
+    count = len(results or [])
+    _log(f"Scraped {count} restaurants (raw)")
+    return results
+
+
+def _ensure_restaurant_schema(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS restaurants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            address TEXT,
+            cuisine TEXT,
+            average_price REAL,
+            rating REAL,
+            reviews REAL,
+            offer REAL,
+            url TEXT,
+            is_excluded INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    try:
+        cur.execute("ALTER TABLE restaurants ADD COLUMN is_excluded INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") -> bool:
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    _log(f"Deduped to {len(deduped)} restaurants from {source or 'catalog'}")
+    if not deduped:
+        return False
+
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_restaurant_schema(cur)
+
+        exclusion_map: dict[str, int] = {}
+        try:
+            rows = cur.execute(
+                "SELECT COALESCE(url,'') AS url, name, COALESCE(is_excluded,0) AS ex FROM restaurants"
+            ).fetchall()
+            for row in rows:
+                key = (row["url"] or "").strip().lower() or (row["name"] or "").strip().lower()
+                if key:
+                    exclusion_map[key] = int(row["ex"] or 0)
+        except sqlite3.OperationalError:
+            exclusion_map = {}
+
+        try:
+            conn.execute("BEGIN")
+            cur.execute("DELETE FROM restaurants")
+            insert_sql = (
+                "INSERT INTO restaurants "
+                "(name, address, cuisine, average_price, rating, reviews, offer, url, is_excluded) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            for row in deduped:
+                name = (row.get("name") or "").strip()
+                if not name:
+                    continue
+                key = (row.get("url") or "").strip().lower() or name.lower()
+                cur.execute(
+                    insert_sql,
+                    (
+                        name,
+                        row.get("address"),
+                        row.get("cuisine"),
+                        row.get("average_price"),
+                        row.get("rating"),
+                        row.get("reviews"),
+                        row.get("offer"),
+                        row.get("url"),
+                        exclusion_map.get(key, 0),
+                    ),
+                )
+            conn.commit()
+            _log(f"Rebuilt restaurants table with {len(deduped)} rows")
+        except Exception as exc:
+            conn.rollback()
+            _log(f"Failed to refresh restaurants table: {exc}")
+            return False
+
+    return True
+
+
+def _refresh_restaurant_catalog() -> bool:
+    csv_path_raw = RESTAURANTS_CSV_PATH
+    if csv_path_raw:
+        path = Path(csv_path_raw)
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        rows = _load_restaurants_from_csv(path)
+        if rows:
+            return _refresh_restaurant_catalog_from_rows(rows, f"CSV {path}")
+        else:
+            _log(f"CSV {path} produced no rows; falling back to live scrape")
+
+    scraped = _scrape_latest_catalog()
+    if not scraped:
+        _log("No catalog rows from scrape; skipping restaurant refresh")
+        return False
+    return _refresh_restaurant_catalog_from_rows(scraped, "live scrape")
 
 
 def _get_last_generated_at(conn: sqlite3.Connection) -> datetime | None:
@@ -277,7 +344,11 @@ def should_refresh_weekly_selection(now: datetime | None = None) -> bool:
 def refresh_weekly_selection() -> None:
     ...  # Old random sampler preserved for reference
 """
-def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size: int | None = None) -> None:
+def refresh_weekly_selection(
+    min_offer: float | int | None = 30,
+    selection_size: int | None = None,
+    max_average_price: float | int | None = 30,
+) -> None:
     """Rotate weekly selection using Thompson Sampling over Beta priors.
 
     Chooses ``selection_size`` restaurants (10 by default) by sampling
@@ -286,9 +357,11 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
     Preserves the output shape and archiving semantics of the previous version.
     If ``min_offer`` is provided, only restaurants with ``offer`` strictly
     greater than that value are eligible; pass ``None`` to disable the filter.
+    If ``max_average_price`` is provided, only restaurants with ``average_price``
+    less than or equal to that value are eligible.
     """
     if AUTO_REFRESH_RESTAURANTS:
-        _refresh_restaurant_catalog_from_scrape()
+        _refresh_restaurant_catalog()
 
     try:
         size = int(selection_size) if selection_size is not None else WEEKLY_SELECTION_SIZE
@@ -311,9 +384,10 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
             row["name"]: {
                 "cuisine": (row["cuisine"] or "").strip().lower(),
                 "offer": row["offer"],
+                "average_price": row["average_price"],
             }
             for row in cur.execute(
-                "SELECT name, cuisine, offer FROM restaurants WHERE COALESCE(is_excluded,0)=0"
+                "SELECT name, cuisine, offer, average_price FROM restaurants WHERE COALESCE(is_excluded,0)=0"
             )
         }
 
@@ -332,6 +406,21 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
                 threshold = 30.0
             return offer_val > threshold
 
+        def _passes_price_filter(name: str) -> bool:
+            if max_average_price is None:
+                return True
+            meta = restaurant_meta.get(name)
+            if not meta:
+                return False
+            price_val = _coerce_numeric(meta.get("average_price"))
+            if price_val is None:
+                return False
+            try:
+                threshold = float(max_average_price)
+            except Exception:
+                threshold = 30.0
+            return price_val <= threshold
+
         samples = []
         for row in stats:
             a = max(1e-6, float(row.get("alpha", 1.0)))
@@ -346,12 +435,18 @@ def refresh_weekly_selection(min_offer: float | int | None = 30, selection_size:
             samples.append((row["name"], p))
         samples.sort(key=lambda x: x[1], reverse=True)
 
-        filtered_samples = samples if min_offer is None else [item for item in samples if _passes_offer_filter(item[0])]
+        def _eligible(name: str) -> bool:
+            return _passes_offer_filter(name) and _passes_price_filter(name)
+
+        filtered_samples = [item for item in samples if _eligible(item[0])]
         if len(filtered_samples) < size:
-            reason = "eligible restaurants"
+            parts = ["eligible restaurants"]
             if min_offer is not None:
-                reason = f"restaurants match offer > {min_offer}"
-            print(
+                parts.append(f"offer > {min_offer}")
+            if max_average_price is not None:
+                parts.append(f"avg_price <= {max_average_price}")
+            reason = " and ".join(parts)
+            _log(
                 f"[refresh_weekly_selection] Only {len(filtered_samples)} {reason}; "
                 f"need at least {size}. Skipping refresh."
             )

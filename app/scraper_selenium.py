@@ -27,7 +27,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 REQUEST_THROTTLE_SECONDS = 2
 LOAD_TIMEOUT_SECONDS = 20
 DEFAULT_SEARCH_URL = (
-    "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=10&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
+    "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1&partySize=5"
+    "&promotionOnly=true&timezone=Europe%2FLondon"
 )
 
 
