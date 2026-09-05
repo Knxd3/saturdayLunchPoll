@@ -27,7 +27,7 @@ AUTO_REFRESH_RESTAURANTS = os.environ.get("AUTO_REFRESH_RESTAURANTS", "1").strip
     "no",
     "off",
 }
-RESTAURANTS_CSV_PATH = os.environ.get("RESTAURANTS_CSV_PATH", "restaurants.csv")
+THEFORK_ORIGIN = "https://www.thefork.co.uk"
 FALLBACK_SEARCH_URL = (
     "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
     "&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
@@ -86,39 +86,29 @@ def _next_saturday_date(now: datetime | None = None) -> str:
 
 
 
-# THEFORK_BASE = "https://www.thefork.co.uk"
+def _on_fly() -> bool:
+    return bool(os.environ.get("FLY_APP_NAME"))
 
-# def _normalize_search_url(base_url: str) -> str:
-#     if not base_url:
-#         return base_url
-#     # Ensure absolute URL — prepend base only if netloc is missing
-#     parsed = urlsplit(base_url)
-#     if not parsed.netloc:
-#         base_url = THEFORK_BASE + base_url
-#         parsed = urlsplit(base_url)
 
-#     pairs = parse_qsl(parsed.query, keep_blank_values=True)
-#     target_date = _next_saturday_date()
-#     replaced_date = False
-#     replaced_page = False
-#     out_pairs: list[tuple[str, str]] = []
-#     for k, v in pairs:
-#         if k == "date":
-#             v = target_date
-#             replaced_date = True
-#         elif k == "p":
-#             v = "1"
-#             replaced_page = True
-#         out_pairs.append((k, v))
-#     if not replaced_date:
-#         out_pairs.append(("date", target_date))
-#     if not replaced_page:
-#         out_pairs.append(("p", "1"))
-#     new_query = urlencode(out_pairs, doseq=True)
-#     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+def _absolute_thefork_url(url: str | None) -> str | None:
+    """Prefix relative TheFork hrefs with https://www.thefork.co.uk."""
+    if url is None:
+        return None
+    s = str(url).strip()
+    if not s:
+        return url
+    parsed = urlsplit(s)
+    if parsed.netloc:
+        return s
+    if s.startswith("/"):
+        return THEFORK_ORIGIN + s
+    return THEFORK_ORIGIN + "/" + s
 
 
 def _normalize_search_url(base_url: str) -> str:
+    if not base_url:
+        return base_url
+    base_url = _absolute_thefork_url(base_url) or base_url
     parsed = urlsplit(base_url)
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     target_date = _next_saturday_date()
@@ -186,7 +176,7 @@ def _load_restaurants_from_csv(path: Path) -> list[dict]:
                         "rating": lowered.get("rating"),
                         "reviews": lowered.get("reviews"),
                         "offer": lowered.get("offer"),
-                        "url": lowered.get("url"),
+                        "url": _absolute_thefork_url(lowered.get("url")),
                         "is_excluded": lowered.get("is_excluded"),
                     }
                 )
@@ -326,9 +316,16 @@ def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") ->
                 "SELECT COALESCE(url,'') AS url, name, COALESCE(is_excluded,0) AS ex FROM restaurants"
             ).fetchall()
             for row in rows:
-                key = (row["url"] or "").strip().lower() or (row["name"] or "").strip().lower()
-                if key:
-                    exclusion_map[key] = int(row["ex"] or 0)
+                ex = int(row["ex"] or 0)
+                name_key = (row["name"] or "").strip().lower()
+                raw_url = (row["url"] or "").strip()
+                if name_key:
+                    exclusion_map[name_key] = ex
+                if raw_url:
+                    exclusion_map[raw_url.lower()] = ex
+                    abs_url = _absolute_thefork_url(raw_url)
+                    if abs_url:
+                        exclusion_map[abs_url.strip().lower()] = ex
         except sqlite3.OperationalError:
             exclusion_map = {}
 
@@ -344,7 +341,10 @@ def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") ->
                 name = (row.get("name") or "").strip()
                 if not name:
                     continue
-                key = (row.get("url") or "").strip().lower() or name.lower()
+                url = _absolute_thefork_url(row.get("url"))
+                ex = exclusion_map.get(name.lower())
+                if ex is None and url:
+                    ex = exclusion_map.get(url.strip().lower())
                 cur.execute(
                     insert_sql,
                     (
@@ -355,8 +355,8 @@ def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") ->
                         row.get("rating"),
                         row.get("reviews"),
                         row.get("offer"),
-                        row.get("url"),
-                        exclusion_map.get(key, 0),
+                        url,
+                        0 if ex is None else ex,
                     ),
                 )
             conn.commit()
@@ -370,19 +370,26 @@ def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") ->
 
 
 def _restaurant_csv_candidates() -> list[Path]:
-    """Return possible CSV locations, preferring explicit env var then /data fallback."""
-    raw = (RESTAURANTS_CSV_PATH or "").strip()
-    base = Path(raw) if raw else Path("restaurants.csv")
-    if not base.is_absolute():
-        base = Path.cwd() / base
-    base = base.resolve()
-    candidates: list[Path] = [base]
+    """CSV locations: explicit env path only, else /data then cwd.
 
+    On Fly the image may contain a stale /app/restaurants.csv from the last
+    deploy. The persistent upload lives at /data/restaurants.csv, so that
+    must win unless RESTAURANTS_CSV_PATH is set.
+    """
+    explicit = os.environ.get("RESTAURANTS_CSV_PATH")
+    if explicit is not None and explicit.strip():
+        path = Path(explicit.strip())
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return [path.resolve()]
+
+    candidates: list[Path] = []
     data_dir = Path("/data")
     if data_dir.exists():
-        fallback = (data_dir / base.name).resolve()
-        if fallback not in candidates:
-            candidates.append(fallback)
+        candidates.append((data_dir / "restaurants.csv").resolve())
+    cwd_csv = (Path.cwd() / "restaurants.csv").resolve()
+    if cwd_csv not in candidates:
+        candidates.append(cwd_csv)
     return candidates
 
 
@@ -395,8 +402,13 @@ def _refresh_restaurant_catalog() -> bool:
         if idx < len(csv_paths) - 1:
             _log(f"CSV {path} produced no rows; trying next fallback")
     if csv_paths:
-        _log(f"CSV {csv_paths[-1]} produced no rows; falling back to live scrape")
+        _log(f"CSV {csv_paths[-1]} produced no rows")
 
+    if _on_fly():
+        _log("On Fly with no CSV rows; keeping existing restaurants table (no scrape fallback)")
+        return False
+
+    _log("Falling back to live scrape")
     scraped = _scrape_latest_catalog()
     if not scraped:
         _log("No catalog rows from scrape; skipping restaurant refresh")

@@ -12,6 +12,7 @@ primary_region = 'lhr'
 [env]
   DB_PATH = '/data/database.db'
   SESSION_COOKIE_SECURE = "1"
+  RESTAURANTS_CSV_PATH = '/data/restaurants.csv'
 
 [[mounts]]
   source = 'data'

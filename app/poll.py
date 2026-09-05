@@ -361,7 +361,9 @@ def show_poll():
 
             new_query = urlencode(_upsert_date(query_pairs))
             new_frag = urlencode(_upsert_date(frag_pairs))
-            return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_frag))
+            scheme = parts.scheme or "https"
+            netloc = parts.netloc or "www.thefork.co.uk"
+            return urlunsplit((scheme, netloc, parts.path, new_query, new_frag))
         except Exception:
             return url
 

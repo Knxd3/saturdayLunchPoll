@@ -33,6 +33,22 @@ DEFAULT_SEARCH_URL = (
 )
 
 
+THEFORK_ORIGIN = "https://www.thefork.co.uk"
+
+
+def _absolute_thefork_url(url: str | None) -> str | None:
+    if not url:
+        return url
+    s = str(url).strip()
+    if not s:
+        return url
+    if "://" in s:
+        return s
+    if s.startswith("/"):
+        return THEFORK_ORIGIN + s
+    return THEFORK_ORIGIN + "/" + s
+
+
 def _pluck_number(text: str | None):
     if not text:
         return None
@@ -86,7 +102,7 @@ def _extract_restaurants(soup: BeautifulSoup) -> list[dict]:
                 "rating": rating_text,
                 "reviews": _pluck_number(reviews_text),
                 "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
-                "url": anchor["href"],
+                "url": _absolute_thefork_url(anchor["href"]),
             }
         )
     return restaurants

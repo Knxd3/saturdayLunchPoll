@@ -7,6 +7,22 @@ import os
 import re
 
 
+THEFORK_ORIGIN = "https://www.thefork.co.uk"
+
+
+def _absolute_thefork_url(url: str | None) -> str | None:
+    if not url:
+        return url
+    s = str(url).strip()
+    if not s:
+        return url
+    if "://" in s:
+        return s
+    if s.startswith("/"):
+        return THEFORK_ORIGIN + s
+    return THEFORK_ORIGIN + "/" + s
+
+
 def _pluck_number(text: str | None):
     if not text:
         return None
@@ -67,7 +83,7 @@ def scrape_restaurants():
                 "reviews": _pluck_number(reviews_text),
                 # store absolute discount percent if present
                 "offer": abs(_pluck_number(offer_text)) if _pluck_number(offer_text) is not None else None,
-                "url": anchor["href"],
+                "url": _absolute_thefork_url(anchor["href"]),
             }
             # results.append(data)
             restaurants.append(data)
