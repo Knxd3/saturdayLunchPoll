@@ -21,13 +21,45 @@ poll_bp = Blueprint("poll", __name__)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
   <title>Saturday Lunch Poll</title>
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+      } catch (e) { /* keep default dark */ }
+    })();
+  </script>
   <style>
     :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --card: #0a0a0a;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --accent-strong: #2563eb;
+      --text: #f3f4f6;
+      --chip: #111111;
+      --chip-border: #262626;
+      --chip-accent-bg: #0b1220;
+      --chip-accent-border: #1e3a8a;
+      --chip-accent-text: #93c5fd;
+      --chip-value-bg: #042f24;
+      --chip-value-border: #065f46;
+      --chip-value-text: #6ee7b7;
+      --border: #1a1a1a;
+      --shadow: 0 6px 24px rgba(0,0,0,0.6);
+      --hover-shadow: 0 4px 16px rgba(59,130,246,0.16);
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
       --bg: #f7fafc;
       --card: #ffffff;
       --muted: #6b7280;
@@ -39,33 +71,54 @@ HTML_TEMPLATE = """
       --chip-accent-bg: #eef2ff;
       --chip-accent-border: #bfdbfe;
       --chip-accent-text: #1e3a8a;
+      --chip-value-bg: #ecfdf5;
+      --chip-value-border: #a7f3d0;
+      --chip-value-text: #065f46;
       --border: #e5e7eb;
       --shadow: 0 6px 24px rgba(0,0,0,0.08);
+      --hover-shadow: 0 4px 16px rgba(37,99,235,0.08);
     }
     * { box-sizing: border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
     .wrap { max-width: 920px; margin: 0 auto; padding: 32px 16px 48px; }
+    .top-actions { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-bottom:1rem; }
+    .auth { display:flex; align-items:center; gap:8px; }
+    .auth img { width:32px; height:32px; border-radius:50%; }
+    .auth-link { color: var(--accent); text-decoration:none; }
+    .auth-link:hover { text-decoration: underline; }
+    .theme-toggle {
+      width:32px; height:32px; border-radius:50%;
+      border:1px solid var(--chip-border); background: var(--chip); color: var(--text);
+      display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer; padding:0; flex:0 0 auto;
+    }
+    .theme-toggle:hover { border-color: var(--accent); }
+    .theme-toggle:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .theme-toggle svg { width:18px; height:18px; display:block; }
+    .theme-toggle .icon-moon { display:none; }
+    html[data-theme="light"] .theme-toggle .icon-sun { display:none; }
+    html[data-theme="light"] .theme-toggle .icon-moon { display:block; }
     .subtitle { text-align:center; margin: 0 auto 24px; max-width: 720px; color: var(--muted); font-size: 14px; }
     .poll { background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 16px; padding: 16px; }
     form { display:grid; grid-template-columns: 1fr; gap: 12px; }
     .option { position:relative; display:flex; gap:12px; padding:14px 14px 10px; border:1px solid var(--border); background: var(--card); border-radius: 12px; align-items:flex-start; transition: border-color .15s ease, transform .05s ease, box-shadow .15s ease; cursor: pointer; width:100%; }
-    .option:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(37,99,235,0.08); }
+    .option:hover { border-color: var(--accent); box-shadow: var(--hover-shadow); }
     .option:active { transform: translateY(1px); }
     .option input { align-self:center; accent-color: var(--accent-strong); flex: 0 0 auto; }
     .option > div { flex: 1 1 auto; min-width: 0; align-self:center; }
     .meta { display:flex; flex-wrap: wrap; gap:6px; margin-top:8px; }
     .chip { border:1px solid var(--chip-border); background: var(--chip); color: var(--muted); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
     .chip-cuisine { padding: 1px 7px; line-height: 1.2; }
-    .chip-accent { background: rgba(238,242,255,0.75); border-color: rgba(191,219,254,0.7); color: rgba(30,58,138,0.8); }
-    .chip-value  { background: rgba(236,253,245,0.75); border-color: rgba(167,243,208,0.65); color: rgba(6,95,70,0.8); }
+    .chip-accent { background: var(--chip-accent-bg); border-color: var(--chip-accent-border); color: var(--chip-accent-text); }
+    .chip-value  { background: var(--chip-value-bg); border-color: var(--chip-value-border); color: var(--chip-value-text); }
     .name { font-weight: 700; letter-spacing:.2px; }
     .info { color: var(--muted); font-size: 12px; margin-top: 6px; display:flex; flex-wrap:wrap; gap:12px; }
     .toprow { display:flex; align-items:center; gap:10px; }
     .rank { width: 34px; height: 15px; border-radius: 6px; background: var(--chip); border:1px solid var(--chip-border); color: var(--muted); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:11px; }
-    .votes { margin-left:auto; background: #eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius: 999px; font-size: 12px; color:#1e3a8a; cursor:pointer; }
+    .votes { margin-left:auto; background: var(--chip-accent-bg); border:1px solid var(--chip-accent-border); padding:4px 10px; border-radius: 999px; font-size: 12px; color: var(--chip-accent-text); cursor:pointer; }
     .votes:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* Cookie-only mode alt (kept for quick toggling):
-    .vote-count { margin-left:auto; background:#eef2ff; border:1px solid #dbeafe; padding:4px 10px; border-radius:999px; font-size:12px; color:#1e3a8a; }
+    .vote-count { margin-left:auto; background: var(--chip-accent-bg); border:1px solid var(--chip-accent-border); padding:4px 10px; border-radius:999px; font-size:12px; color: var(--chip-accent-text); }
     */
     .voter-popup { position:absolute; top:36px; right:14px; z-index:20; background: var(--card); border:1px solid var(--border); box-shadow: var(--shadow); border-radius: 10px; padding:10px 12px; width:220px; display:none; }
     .voter-popup.open { display:block; }
@@ -90,8 +143,6 @@ HTML_TEMPLATE = """
       .meta { gap:4px; }
       .chip { font-size: 11px; padding: 1px 7px; }
       .chip-cuisine { padding: 0 6px; }
-      .chip-accent { border-color: rgba(191,219,254,0.6); color: rgba(30,58,138,0.75); }
-      .chip-value { border-color: rgba(167,243,208,0.55); color: rgba(6,95,70,0.75); }
       .name { font-size: 15px; line-height: 1.25; }
       .info { font-size: 11px; gap: 8px; }
       .votes { font-size: 11px; padding: 3px 8px; }
@@ -105,15 +156,23 @@ HTML_TEMPLATE = """
   </head>
   <body>
     <div class="wrap">
-      <!-- Top-right login/logout -->
-      <div style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
+      <!-- Top-right theme + login/logout -->
+      <div class="top-actions">
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch to light mode" title="Switch to light mode">
+          <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zm0 12a4 4 0 100-8 4 4 0 000 8zm8.25-4.75a.75.75 0 000-1.5h-1.5a.75.75 0 000 1.5h1.5zM10 16.5a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5a.75.75 0 01.75-.75zM3.25 10a.75.75 0 00-.75-.75h-1.5a.75.75 0 000 1.5H2.5A.75.75 0 003.25 10zm1.03-5.47a.75.75 0 011.06 0l1.06 1.06a.75.75 0 11-1.06 1.06L4.28 5.59a.75.75 0 010-1.06zm9.54 9.54a.75.75 0 011.06 0l1.06 1.06a.75.75 0 11-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zM14.41 4.28a.75.75 0 011.06 1.06l-1.06 1.06a.75.75 0 11-1.06-1.06l1.06-1.06zM5.59 14.41a.75.75 0 011.06 1.06l-1.06 1.06a.75.75 0 11-1.06-1.06l1.06-1.06z"/>
+          </svg>
+          <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+          </svg>
+        </button>
         {% if session.get('user') %}
-          <div>
-            <img src="{{ session['user']['picture'] }}" alt="profile" style="width:32px; height:32px; border-radius:50%; vertical-align:middle;">
-            <a href="{{ url_for('login.logout') }}" style="color:#2563eb; text-decoration:none; margin-left:0.5rem;">Logout</a>
+          <div class="auth">
+            <img src="{{ session['user']['picture'] }}" alt="profile">
+            <a href="{{ url_for('login.logout') }}" class="auth-link">Logout</a>
           </div>
         {% else %}
-          <a href="{{ url_for('login.login') }}" style="color:#2563eb; text-decoration:none;">Login</a>
+          <a href="{{ url_for('login.login') }}" class="auth-link">Login</a>
         {% endif %}
       </div>
       <!-- Cookie-only header (kept for quick toggling):
@@ -123,7 +182,7 @@ HTML_TEMPLATE = """
       <!-- Title + subtitle -->
       <div style="text-align:center; margin-bottom:1rem;">
         <h1 style="margin:1rem;">Where should we go for lunch?</h1>
-        <div class="subtitle" style="font-size:0.95rem; color:#555;">
+        <div class="subtitle" style="font-size:0.95rem;">
           Vote for this week's pick. Options refresh every Sunday at 09:00. Voting closes Tuesday 21:00.
         </div>
         {% if already_voted %}
@@ -221,6 +280,27 @@ HTML_TEMPLATE = """
   <script>
     (function() {
       try {
+        var root = document.documentElement;
+        var btn = document.getElementById('themeToggle');
+        function currentTheme() {
+          return root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        }
+        function applyTheme(theme) {
+          root.setAttribute('data-theme', theme);
+          try { localStorage.setItem('theme', theme); } catch (e) { /* ignore */ }
+          if (btn) {
+            var next = theme === 'dark' ? 'light' : 'dark';
+            var label = 'Switch to ' + next + ' mode';
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('title', label);
+          }
+        }
+        applyTheme(currentTheme());
+        if (btn) {
+          btn.addEventListener('click', function() {
+            applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+          });
+        }
         var chips = document.querySelectorAll('.chip');
         chips.forEach(function(el){
           var t = (el.textContent || '').trim();
