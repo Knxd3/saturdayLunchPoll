@@ -4,9 +4,9 @@ Poll routes.
 import uuid
 from flask import Blueprint, render_template_string, request, redirect, url_for, make_response, session
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-from .timeutil import now_london, week_monday_london
+from .timeutil import now_london, week_monday_london, to_london
 from .poll_manager import (
     ensure_weekly_selection,
     get_current_week_selection,
@@ -300,6 +300,13 @@ HTML_TEMPLATE = """
 """
 
 
+def _upcoming_saturday_iso(base_dt: datetime | None = None) -> str:
+    """Return the next Saturday date (ISO) relative to the provided time."""
+    dt = to_london(base_dt) if base_dt else now_london()
+    days_ahead = (5 - dt.weekday()) % 7
+    return (dt + timedelta(days=days_ahead)).date().isoformat()
+
+
 @poll_bp.route("/")
 def show_poll():
     # Ensure current week's selection exists and is up-to-date
@@ -322,6 +329,7 @@ def show_poll():
 
     # Normalize mapping, trim addresses, and align URLs to the current Saturday
     normalized_options = []
+    default_saturday_date = _upcoming_saturday_iso(now_london())
     try:
         window = get_voting_window()
         open_iso = window.get("open")
@@ -329,11 +337,9 @@ def show_poll():
             open_dt = to_london(datetime.fromisoformat(open_iso))
             saturday_date = (open_dt + timedelta(days=6)).date().isoformat()
         else:
-            week_monday = week_monday_london(now_london())
-            saturday_date = (week_monday + timedelta(days=5)).date().isoformat()
+            saturday_date = default_saturday_date
     except Exception:
-        week_monday = week_monday_london(now_london())
-        saturday_date = (week_monday + timedelta(days=5)).date().isoformat()
+        saturday_date = default_saturday_date
 
     def _apply_date(url: str) -> str:
         try:

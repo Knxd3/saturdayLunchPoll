@@ -32,6 +32,29 @@ FALLBACK_SEARCH_URL = (
     "https://www.thefork.co.uk/search?cityId=665790&date=2026-02-28&hour=780&p=1"
     "&partySize=5&promotionOnly=true&timezone=Europe%2FLondon"
 )
+DEFAULT_POSTCODE_FILTER_PREFIXES = (
+    "EC",
+    "WC",
+    "W1",
+    "W2",
+    "SW1",
+    "SW3",
+    "SW5",
+    "SW7",
+    "NW1",
+    "NW5",
+    "N1",
+    "SE1",
+    "E1",
+)
+_postcode_env = os.environ.get("POSTCODE_FILTER_PREFIXES")
+if _postcode_env is None:
+    POSTCODE_FILTER_PREFIXES = DEFAULT_POSTCODE_FILTER_PREFIXES
+else:
+    POSTCODE_FILTER_PREFIXES = tuple(
+        dict.fromkeys(part.strip().upper() for part in _postcode_env.split(",") if part.strip())
+    )
+POSTCODE_OUTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}\b", re.IGNORECASE)
 
 
 def _log(msg: str) -> None:
@@ -62,6 +85,39 @@ def _next_saturday_date(now: datetime | None = None) -> str:
     return target.date().isoformat()
 
 
+
+# THEFORK_BASE = "https://www.thefork.co.uk"
+
+# def _normalize_search_url(base_url: str) -> str:
+#     if not base_url:
+#         return base_url
+#     # Ensure absolute URL — prepend base only if netloc is missing
+#     parsed = urlsplit(base_url)
+#     if not parsed.netloc:
+#         base_url = THEFORK_BASE + base_url
+#         parsed = urlsplit(base_url)
+
+#     pairs = parse_qsl(parsed.query, keep_blank_values=True)
+#     target_date = _next_saturday_date()
+#     replaced_date = False
+#     replaced_page = False
+#     out_pairs: list[tuple[str, str]] = []
+#     for k, v in pairs:
+#         if k == "date":
+#             v = target_date
+#             replaced_date = True
+#         elif k == "p":
+#             v = "1"
+#             replaced_page = True
+#         out_pairs.append((k, v))
+#     if not replaced_date:
+#         out_pairs.append(("date", target_date))
+#     if not replaced_page:
+#         out_pairs.append(("p", "1"))
+#     new_query = urlencode(out_pairs, doseq=True)
+#     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
 def _normalize_search_url(base_url: str) -> str:
     parsed = urlsplit(base_url)
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
@@ -83,6 +139,27 @@ def _normalize_search_url(base_url: str) -> str:
         out_pairs.append(("p", "1"))
     new_query = urlencode(out_pairs, doseq=True)
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
+def _extract_postcode_outcode(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = POSTCODE_OUTCODE_RE.search(text.upper())
+    if match:
+        return match.group(1).upper()
+    return None
+
+
+def _address_matches_allowed_postcode(address: str | None, precomputed_outcode: str | None = None) -> bool:
+    """Return True if postcode filtering is disabled or the address matches the allowed prefixes."""
+    if not POSTCODE_FILTER_PREFIXES:
+        return True
+    candidate = precomputed_outcode or _extract_postcode_outcode(address)
+    if not candidate:
+        candidate = (address or "").strip().upper()
+    if not candidate:
+        return False
+    return any(candidate.startswith(prefix) for prefix in POSTCODE_FILTER_PREFIXES)
 
 
 def _load_restaurants_from_csv(path: Path) -> list[dict]:
@@ -292,17 +369,33 @@ def _refresh_restaurant_catalog_from_rows(rows: list[dict], source: str = "") ->
     return True
 
 
+def _restaurant_csv_candidates() -> list[Path]:
+    """Return possible CSV locations, preferring explicit env var then /data fallback."""
+    raw = (RESTAURANTS_CSV_PATH or "").strip()
+    base = Path(raw) if raw else Path("restaurants.csv")
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    base = base.resolve()
+    candidates: list[Path] = [base]
+
+    data_dir = Path("/data")
+    if data_dir.exists():
+        fallback = (data_dir / base.name).resolve()
+        if fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
 def _refresh_restaurant_catalog() -> bool:
-    csv_path_raw = RESTAURANTS_CSV_PATH
-    if csv_path_raw:
-        path = Path(csv_path_raw)
-        if not path.is_absolute():
-            path = (Path.cwd() / path).resolve()
+    csv_paths = _restaurant_csv_candidates()
+    for idx, path in enumerate(csv_paths):
         rows = _load_restaurants_from_csv(path)
         if rows:
             return _refresh_restaurant_catalog_from_rows(rows, f"CSV {path}")
-        else:
-            _log(f"CSV {path} produced no rows; falling back to live scrape")
+        if idx < len(csv_paths) - 1:
+            _log(f"CSV {path} produced no rows; trying next fallback")
+    if csv_paths:
+        _log(f"CSV {csv_paths[-1]} produced no rows; falling back to live scrape")
 
     scraped = _scrape_latest_catalog()
     if not scraped:
@@ -380,16 +473,19 @@ def refresh_weekly_selection(
             return
         # Thompson sampling with clipped Beta sample to reduce extreme randomness
         
-        restaurant_meta: dict[str, dict[str, object]] = {
-            row["name"]: {
+        restaurant_meta: dict[str, dict[str, object]] = {}
+        meta_rows = cur.execute(
+            "SELECT name, address, cuisine, offer, average_price FROM restaurants WHERE COALESCE(is_excluded,0)=0"
+        ).fetchall()
+        for row in meta_rows:
+            addr = row["address"] if "address" in row.keys() else None
+            restaurant_meta[row["name"]] = {
+                "address": addr,
                 "cuisine": (row["cuisine"] or "").strip().lower(),
                 "offer": row["offer"],
                 "average_price": row["average_price"],
+                "postcode_outcode": _extract_postcode_outcode(addr),
             }
-            for row in cur.execute(
-                "SELECT name, cuisine, offer, average_price FROM restaurants WHERE COALESCE(is_excluded,0)=0"
-            )
-        }
 
         def _passes_offer_filter(name: str) -> bool:
             if min_offer is None:
@@ -421,6 +517,12 @@ def refresh_weekly_selection(
                 threshold = 30.0
             return price_val <= threshold
 
+        def _passes_postcode_filter(name: str) -> bool:
+            meta = restaurant_meta.get(name)
+            if not meta:
+                return False if POSTCODE_FILTER_PREFIXES else True
+            return _address_matches_allowed_postcode(meta.get("address"), meta.get("postcode_outcode"))
+
         samples = []
         for row in stats:
             a = max(1e-6, float(row.get("alpha", 1.0)))
@@ -436,7 +538,11 @@ def refresh_weekly_selection(
         samples.sort(key=lambda x: x[1], reverse=True)
 
         def _eligible(name: str) -> bool:
-            return _passes_offer_filter(name) and _passes_price_filter(name)
+            return (
+                _passes_offer_filter(name)
+                and _passes_price_filter(name)
+                and _passes_postcode_filter(name)
+            )
 
         filtered_samples = [item for item in samples if _eligible(item[0])]
         if len(filtered_samples) < size:
@@ -445,6 +551,8 @@ def refresh_weekly_selection(
                 parts.append(f"offer > {min_offer}")
             if max_average_price is not None:
                 parts.append(f"avg_price <= {max_average_price}")
+            if POSTCODE_FILTER_PREFIXES:
+                parts.append(f"postcode in {{{', '.join(POSTCODE_FILTER_PREFIXES)}}}")
             reason = " and ".join(parts)
             _log(
                 f"[refresh_weekly_selection] Only {len(filtered_samples)} {reason}; "
@@ -578,6 +686,11 @@ def get_current_week_selection() -> list[dict]:
             (ts, ts),
         ).fetchall()
         options = [dict(r) for r in rows]
+        for opt in options:
+            url = opt.get("url")
+            if isinstance(url, str) and url.strip():
+                # Always render TheFork-style URLs pointing at the upcoming Saturday
+                opt["url"] = _normalize_search_url(url)
         # Compute derived display fields (e.g., Net Average from average_price and offer, beta credible interval)
         import re
         def _parse_price(val: str | None) -> float | None:

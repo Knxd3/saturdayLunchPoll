@@ -63,6 +63,8 @@ def login():
         include_granted_scopes="true" #, prompt="consent" - not necessary every time
     )
     session["state"] = state
+    # Persist PKCE verifier for callback/token exchange
+    session["code_verifier"] = flow.code_verifier
     return redirect(authorization_url)
 
 
@@ -76,7 +78,8 @@ def callback():
         return redirect(url_for("poll.show_poll"))
 
     flow = build_flow(REDIRECT_URI, state=session.get("state"))
-    flow.fetch_token(authorization_response=request.url)
+    code_verifier = session.pop("code_verifier", None)
+    flow.fetch_token(authorization_response=request.url, code_verifier=code_verifier)
     credentials = flow.credentials
 
     from googleapiclient.discovery import build

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import random
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -101,17 +102,47 @@ def _chromedriver_path() -> str | None:
     return None
 
 
+# def _create_driver() -> webdriver.Chrome:
+#     chrome_options = Options()
+#     chrome_options.add_argument("--headless=new")
+#     chrome_options.add_argument("--disable-gpu")
+#     chrome_options.add_argument("--disable-dev-shm-usage")
+#     chrome_options.add_argument("--no-sandbox")
+#     chrome_options.add_argument("--window-size=1280,720")
+#     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+#     chrome_options.add_argument(
+#         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+#     )
+
+#     binary = os.environ.get("CHROME_BIN")
+#     if binary:
+#         chrome_options.binary_location = binary
+
+#     driver_path = _chromedriver_path()
+#     if driver_path:
+#         service = Service(driver_path)
+#         return webdriver.Chrome(service=service, options=chrome_options)
+#     return webdriver.Chrome(options=chrome_options)
+
+print(_chromedriver_path())
+
+#### replace user agent with this to avoid captcha
 def _create_driver() -> webdriver.Chrome:
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--window-size=1280,720")
+    chrome_options.add_argument("--window-size=1920,1080")  # more realistic size
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-    )
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+    )                                                        # ^^^ updated version
+    chrome_options.add_argument("--dns-prefetch-disable")
+    chrome_options.add_argument("--host-resolver-rules=MAP * 0.0.0.0 , EXCLUDE *.thefork.co.uk,*.thefork.com")
+    # Hide automation flags
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
 
     binary = os.environ.get("CHROME_BIN")
     if binary:
@@ -120,8 +151,16 @@ def _create_driver() -> webdriver.Chrome:
     driver_path = _chromedriver_path()
     if driver_path:
         service = Service(driver_path)
-        return webdriver.Chrome(service=service, options=chrome_options)
-    return webdriver.Chrome(options=chrome_options)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+    else:
+        driver = webdriver.Chrome(options=chrome_options)
+
+    # Patch navigator.webdriver to undefined
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+
+    return driver
 
 
 @contextmanager
@@ -135,6 +174,19 @@ def browser(driver: webdriver.Chrome | None = None) -> Iterator[webdriver.Chrome
             active.quit()
 
 
+#### replace user agent with this to avoid captcha
+# def _fetch_page_source(driver: webdriver.Chrome, url: str) -> str:
+#     driver.get(url)
+#     try:
+#         WebDriverWait(driver, LOAD_TIMEOUT_SECONDS).until(
+#             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-testid='result-list-restaurants']"))
+#         )
+#     except TimeoutException:
+#         pass
+#     return driver.page_source
+
+
+
 def _fetch_page_source(driver: webdriver.Chrome, url: str) -> str:
     driver.get(url)
     try:
@@ -142,7 +194,8 @@ def _fetch_page_source(driver: webdriver.Chrome, url: str) -> str:
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-testid='result-list-restaurants']"))
         )
     except TimeoutException:
-        pass
+        print(f"Timed out on: {driver.title}")
+    time.sleep(random.uniform(1.5, 3.5))  # mimic human reading time
     return driver.page_source
 
 
@@ -154,7 +207,9 @@ def scrape_restaurants(base_url: str | None = None, pages: int = 3, driver: webd
     with browser(driver) as drv:
         for page in range(1, total_pages + 1):
             page_url = _build_page_url(url, page)
+            print(page_url)
             html = _fetch_page_source(drv, page_url)
+            print(html)
             soup = BeautifulSoup(html, "html.parser")
             restaurants.extend(_extract_restaurants(soup))
             if page < total_pages:
